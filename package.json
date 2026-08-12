@@ -1,0 +1,81 @@
+{
+  "name": "cursor-chatgpt-web",
+  "version": "2.1.8",
+  "private": true,
+  "description": "ChatGPT Web specialist for Cursor: MCP delegation to GPT-5.6 Sol High, isolated Temporary Chats, and an experimental model-picker bridge.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/miuuyy/codex-chatgpt-web.git"
+  },
+  "homepage": "https://github.com/miuuyy/codex-chatgpt-web#readme",
+  "bugs": {
+    "url": "https://github.com/miuuyy/codex-chatgpt-web/issues"
+  },
+  "packageManager": "bun@1.3.14",
+  "type": "module",
+  "bin": {
+    "cursor-chatgpt-web": "./src/cli.ts",
+    "codex-chatgpt-web": "./src/cli.ts"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "LICENSES"
+  ],
+  "scripts": {
+    "probe": "bun run src/cursor/fixtures/capture-server.ts",
+    "cursor-mcp": "bun run src/cli.ts cursor-mcp",
+    "setup": "bun run src/cli.ts setup",
+    "doctor": "bun run src/cli.ts doctor",
+    "test": "bun test tests/*.test.ts",
+    "audit": "bun audit",
+    "check-version": "bun run scripts/check-version.ts",
+    "typecheck": "bunx tsc --noEmit",
+    "licenses": "bun run scripts/generate-third-party-notices.ts --include-launcher",
+    "clean": "bun run scripts/clean.ts",
+    "build": "bun run scripts/build-runtime-bundle.ts",
+    "smoke": "bun run scripts/smoke-release.ts dist/runtime",
+    "smoke:codex": "bun run scripts/smoke-codex-catalog.ts",
+    "launcher": "bun run scripts/start-launcher.ts",
+    "app": "bun run scripts/start-launcher.ts",
+    "app:package": "bun run --cwd launcher package",
+    "app:smoke": "bun run --cwd launcher smoke:package",
+    "launcher:dev": "bun run --cwd launcher dev",
+    "launcher:typecheck": "bun run --cwd launcher typecheck",
+    "launcher:build": "bun run --cwd launcher build",
+    "launcher:test": "bun run --cwd launcher test",
+    "verify": "bun run scripts/verify.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "chromium-bidi": "12.1.0",
+    "fflate": "^0.8.2",
+    "playwright-core": "^1.62.0",
+    "tiktoken": "1.0.22",
+    "turndown": "7.2.0",
+    "turndown-plugin-gfm": "1.0.2",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "@types/turndown": "5.0.5",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "bun": "1.3.14"
+  },
+  "overrides": {
+    "@hono/node-server": "2.0.12",
+    "fast-uri": "3.1.5",
+    "hono": "4.12.34",
+    "zod-to-json-schema": "3.25.1"
+  },
+  "keywords": [
+    "cursor",
+    "chatgpt",
+    "mcp",
+    "playwright"
+  ],
+  "license": "MIT"
+}

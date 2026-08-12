@@ -1,0 +1,14 @@
+{
+  "description": "Replace this file by running `bun run src/cursor/fixtures/capture-server.ts` against your installed Cursor build. Do not invent Cursor request shapes.",
+  "probes": [
+    "Ask mode",
+    "Agent mode",
+    "Streaming",
+    "Cancel",
+    "Images",
+    "Tools",
+    "Follow-up",
+    "Custom model chatgpt-web-high",
+    "Subagent model selection from Grok and Composer parents"
+  ]
+}
