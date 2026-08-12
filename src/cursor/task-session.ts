@@ -9,8 +9,10 @@ import {
   type ChatGptWebBackendModel,
   type CursorChatGptWebMode,
 } from "../chatgpt-web-models";
+import { assertBatchRequest } from "./batch";
+import { detectChatGptWebCapabilities } from "./capabilities";
 import { compileDelegationEnvelope, type DelegationMetadata, type SpecialistImage, type ThreadMessage } from "./delegation-compiler";
-import { ChatGptWebTabLimitError, CursorChatGptWebError, UnknownCursorModelError } from "./errors";
+import { CursorChatGptWebError, UnknownCursorModelError } from "./errors";
 import { TabPool } from "./tab-pool";
 
 export type { DelegationMetadata, SpecialistImage };
@@ -38,6 +40,7 @@ export interface SpecialistTurnRequest {
   images?: SpecialistImage[];
   metadata?: DelegationMetadata;
   jobId?: string;
+  onTextDelta?: (text: string) => void;
 }
 
 export interface SpecialistTurnResult {
@@ -134,13 +137,13 @@ export class TaskSessionManager {
   }
 
   status(): {
-    capabilities: ChatGptWebAccountCapabilities & { defaultMode: CursorChatGptWebMode };
+    capabilities: ReturnType<typeof detectChatGptWebCapabilities>;
     pool: { active: number; max: number; slots: ReturnType<TabPool["snapshot"]> };
     jobs: SpecialistJobSnapshot[];
     threads: Array<{ threadId: string; mode: CursorChatGptWebMode; messages: number; updatedAt: number }>;
   } {
     return {
-      capabilities: { ...this.options.capabilities, defaultMode: CURSOR_CHATGPT_WEB_DEFAULT_MODE },
+      capabilities: detectChatGptWebCapabilities(this.options.capabilities),
       pool: { active: this.pool.activeCount, max: this.pool.max, slots: this.pool.snapshot() },
       jobs: [...this.jobs.values()].map(job => ({
         jobId: job.jobId,
@@ -210,6 +213,7 @@ export class TaskSessionManager {
         prompt: compiled.text,
         images: compiled.images,
         abortSignal: abort.signal,
+        onTextDelta: request.onTextDelta,
         onReasoningSummary: (text, continuation) => {
           if (!continuation) reasoning.push(text);
           else if (reasoning.length > 0) reasoning[reasoning.length - 1] += text;
@@ -267,21 +271,12 @@ export class TaskSessionManager {
   }
 
   async batch(request: SpecialistBatchRequest): Promise<SpecialistBatchResult> {
-    if (!Array.isArray(request.tasks) || request.tasks.length === 0) {
-      throw new CursorChatGptWebError("chatgpt_web_batch requires at least one task", { status: 400, code: "empty_batch" });
-    }
-    const ids = request.tasks.map(task => task.id.trim());
-    if (ids.some(id => !id)) {
-      throw new CursorChatGptWebError("chatgpt_web_batch tasks require a non-empty id", { status: 400, code: "invalid_batch_id" });
-    }
-    if (new Set(ids).size !== ids.length) {
-      throw new CursorChatGptWebError("chatgpt_web_batch task ids must be unique", { status: 400, code: "duplicate_batch_id" });
-    }
-    if (request.tasks.length > this.pool.max) throw new ChatGptWebTabLimitError(this.pool.max);
-    const available = this.pool.max - this.pool.activeCount;
-    if (request.tasks.length > available) throw new ChatGptWebTabLimitError(this.pool.max);
+    const tasks = assertBatchRequest(request, {
+      max: this.pool.max,
+      available: this.pool.max - this.pool.activeCount,
+    });
 
-    const results = await Promise.all(request.tasks.map(async task => {
+    const results = await Promise.all(tasks.map(async task => {
       const result = await this.turn({
         prompt: task.prompt,
         mode: request.mode,

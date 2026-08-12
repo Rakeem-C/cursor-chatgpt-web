@@ -6,6 +6,31 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+export const CURSOR_PROBE_CHECKLIST = [
+  "Ask mode with custom model chatgpt-web-high",
+  "Agent mode with custom model chatgpt-web-high",
+  "Streaming",
+  "Cancel",
+  "Images",
+  "Tools",
+  "Follow-up / previous_response_id",
+  "Custom models listed in /v1/models",
+  "Subagent Task(model=chatgpt-web-high) from a Grok parent",
+  "Subagent Task(model=chatgpt-web-high) from a Composer parent",
+] as const;
+
+export function printCursorProbeChecklist(): string {
+  return [
+    "Phase 0 — capture real Cursor traffic before treating the picker as supported.",
+    "",
+    ...CURSOR_PROBE_CHECKLIST.map((item, index) => `${index + 1}. ${item}`),
+    "",
+    "Also detect the ChatGPT account: Sol? High? Extra High? Pro? Luna-only?",
+    "Do not invent request shapes. Point Cursor at http://127.0.0.1:17843/v1 and inspect src/cursor/fixtures/captured/.",
+    "",
+  ].join("\n");
+}
+
 export function startCursorProbeServer(options: { port?: number; dir?: string } = {}): { port: number; dir: string; stop: () => void } {
   const port = options.port ?? Number(process.env.CURSOR_CHATGPT_WEB_PROBE_PORT || 17843);
   const dir = resolve(options.dir || process.env.CURSOR_CHATGPT_WEB_CAPTURE_DIR || join(process.cwd(), "src/cursor/fixtures/captured"));
@@ -31,6 +56,7 @@ export function startCursorProbeServer(options: { port?: number; dir?: string } 
         body,
       };
       writeFileSync(join(dir, `${stamp}${url.pathname.replaceAll("/", "_") || "_root"}.json`), `${JSON.stringify(payload, null, 2)}\n`);
+      writeFileSync(join(dir, "CHECKLIST.md"), printCursorProbeChecklist());
       if (url.pathname.endsWith("/models")) {
         return Response.json({
           object: "list",

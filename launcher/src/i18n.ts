@@ -135,6 +135,15 @@ const en = {
   sessionReminderTitle: "Refresh your ChatGPT session",
   sessionReminderBody: "We recommend signing in again every two days. A stale ChatGPT session can interrupt Web model turns and MCP tools.",
   logOut: "Log out",
+  cursorSpecialist: "Cursor specialist",
+  cursorSpecialistBody: "Install GPT Web High as an MCP specialist for Cursor. Sign-in and the High smoke test above are shared. Restart Cursor after installing.",
+  installCursor: "Install Cursor MCP",
+  cursorInstalled: "Cursor MCP installed; restart Cursor",
+  removeCursor: "Remove Cursor MCP",
+  cursorRemoved: "Cursor MCP removed",
+  testGptWeb: "Test GPT Web High",
+  testGptWebBody: "Select High, send a small Temporary Chat, and verify a streamed response.",
+  activeTasks: "Active GPT Web tasks",
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
@@ -272,6 +281,15 @@ const zh: Record<keyof typeof en, string> = {
   sessionReminderTitle: "刷新 ChatGPT 会话",
   sessionReminderBody: "建议每两天重新登录一次。失效的 ChatGPT 会话可能会中断 Web 模型任务和 MCP 工具。",
   logOut: "退出登录",
+  cursorSpecialist: "Cursor 专家",
+  cursorSpecialistBody: "将 GPT Web High 安装为 Cursor 的 MCP 专家。上方的登录与 High 冒烟测试可共用。安装后请重启 Cursor。",
+  installCursor: "安装 Cursor MCP",
+  cursorInstalled: "已安装 Cursor MCP；请重启 Cursor",
+  removeCursor: "移除 Cursor MCP",
+  cursorRemoved: "已移除 Cursor MCP",
+  testGptWeb: "测试 GPT Web High",
+  testGptWebBody: "选择 High，发送一条临时聊天，并验证流式响应。",
+  activeTasks: "正在运行的 GPT Web 任务",
 };
 
 export type Copy = typeof en;

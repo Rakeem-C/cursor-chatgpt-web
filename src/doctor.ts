@@ -3,6 +3,8 @@ import type { AppConfig } from "./config";
 import { getConfigDir, getConfigPath, loadConfig } from "./config";
 import { join } from "node:path";
 import { inspectCodexIntegration } from "./codex-integration";
+import { detectChatGptWebCapabilities } from "./cursor/capabilities";
+import { inspectCursorIntegration } from "./cursor/inspect";
 import { browserLoginStateExists, loginVerificationMarkerPath } from "./browser-login";
 import { getServiceStatus } from "./service";
 import { tunnelStatus } from "./tunnel";
@@ -146,6 +148,31 @@ export async function runDoctor(): Promise<DoctorReport> {
   } else {
     checks.push({ id: "codex", status: "ok", message: "Codex native model route is installed" });
   }
+
+  const cursor = inspectCursorIntegration();
+  checks.push(cursor.installed
+    ? { id: "cursor-mcp", status: "ok", message: `Cursor MCP specialist is installed (${cursor.mcpPath})` }
+    : {
+        id: "cursor-mcp",
+        status: "warning",
+        message: "Cursor MCP specialist is not installed; run `cursor-chatgpt-web install-cursor`",
+        detail: cursor.errors.join("; ") || undefined,
+      });
+
+  const detected = detectChatGptWebCapabilities({
+    solAvailable: config.solAvailable,
+    proAvailable: config.proAvailable,
+  });
+  checks.push({
+    id: "account-modes",
+    status: detected.highAvailable || detected.lunaOnly ? "ok" : "error",
+    message: detected.lunaOnly
+      ? "ChatGPT account is Luna-only; default specialist is chatgpt-web-luna"
+      : detected.extraHighAvailable
+        ? "ChatGPT High, Extra High, and Pro are available; default specialist is chatgpt-web-high"
+        : "ChatGPT High is available; default specialist is chatgpt-web-high",
+    detail: detected.modes.filter(mode => mode.available).map(mode => mode.cursorId).join(", "),
+  });
 
   const service = getServiceStatus();
   if (config.browserHost === "launcher") {

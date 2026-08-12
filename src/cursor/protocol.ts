@@ -3,15 +3,16 @@ import { join } from "node:path";
 import { availableCursorChatGptWebRoutes, parseCursorChatGptWebMode } from "../chatgpt-web-models";
 import { CursorChatGptWebError, isCursorChatGptWebError, UnknownCursorModelError } from "./errors";
 import { getCursorSpecialistRuntime } from "./runtime";
-import type { SpecialistTurnResult } from "./task-session";
+import type { SpecialistImage, SpecialistTurnResult } from "./task-session";
 
 export interface CursorTurn {
   model: string;
   input: string;
-  images?: Array<{ imageUrl: string; detail?: string }>;
+  images?: SpecialistImage[];
   previousResponseId?: string;
   stream: boolean;
   abortSignal: AbortSignal;
+  ignoredToolCount: number;
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -28,8 +29,47 @@ function textFromContent(content: unknown): string {
     if (!item) return "";
     if (typeof item.text === "string") return item.text;
     if (item.type === "output_text" && typeof item.text === "string") return item.text;
+    if (item.type === "input_text" && typeof item.text === "string") return item.text;
     return "";
   }).filter(Boolean).join("\n");
+}
+
+function imageFromPart(part: unknown): SpecialistImage | undefined {
+  const item = record(part);
+  if (!item) return undefined;
+  const nested = record(item.image_url) ?? record(item.imageUrl);
+  const imageUrl = typeof item.imageUrl === "string"
+    ? item.imageUrl
+    : typeof nested?.url === "string"
+      ? nested.url
+      : typeof item.image_url === "string"
+        ? item.image_url
+        : undefined;
+  if (!imageUrl) return undefined;
+  const detail = typeof item.detail === "string"
+    ? item.detail
+    : typeof nested?.detail === "string"
+      ? nested.detail
+      : undefined;
+  return { imageUrl, ...(detail ? { detail } : {}) };
+}
+
+function collectImages(body: Record<string, unknown>): SpecialistImage[] {
+  const images: SpecialistImage[] = [];
+  const walk = (content: unknown) => {
+    if (!Array.isArray(content)) return;
+    for (const part of content) {
+      const image = imageFromPart(part);
+      if (image) images.push(image);
+    }
+  };
+  if (Array.isArray(body.messages)) {
+    for (const message of body.messages) walk(record(message)?.content);
+  }
+  if (Array.isArray(body.input)) {
+    for (const message of body.input) walk(record(message)?.content ?? message);
+  }
+  return images.slice(0, 10);
 }
 
 function collectMessages(body: Record<string, unknown>): string {
@@ -64,12 +104,16 @@ export function parseCursorHttpBody(body: unknown, abortSignal: AbortSignal): Cu
   const input = collectMessages(parsed).trim();
   if (!input) throw new CursorChatGptWebError("Request has no prompt or messages", { status: 400, code: "empty_input" });
   const previousResponseId = typeof parsed.previous_response_id === "string" ? parsed.previous_response_id : undefined;
+  const images = collectImages(parsed);
+  const ignoredToolCount = Array.isArray(parsed.tools) ? parsed.tools.length : 0;
   return {
     model,
     input,
+    ...(images.length > 0 ? { images } : {}),
     ...(previousResponseId ? { previousResponseId } : {}),
     stream: parsed.stream === true,
     abortSignal,
+    ignoredToolCount,
   };
 }
 
@@ -112,11 +156,16 @@ function captureRequest(url: URL, body: unknown): void {
   }, null, 2)}\n`);
 }
 
-async function runTurn(turn: CursorTurn): Promise<SpecialistTurnResult> {
+async function runTurn(
+  turn: CursorTurn,
+  onTextDelta?: (text: string) => void,
+): Promise<SpecialistTurnResult> {
   return await getCursorSpecialistRuntime().turn({
     prompt: turn.input,
     mode: turn.model,
     ...(turn.previousResponseId ? { threadId: turn.previousResponseId } : {}),
+    ...(turn.images ? { images: turn.images } : {}),
+    ...(onTextDelta ? { onTextDelta } : {}),
   });
 }
 
@@ -124,24 +173,37 @@ function completionId(result: SpecialistTurnResult): string {
   return result.threadId || result.jobId;
 }
 
-function streamChatCompletions(result: SpecialistTurnResult): Response {
-  const id = `chatcmpl-${completionId(result)}`;
+function streamChatCompletions(turn: CursorTurn): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
-    start(controller) {
+    async start(controller) {
       const send = (payload: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
-      send({
-        id,
-        object: "chat.completion.chunk",
-        choices: [{ index: 0, delta: { role: "assistant", content: result.answer }, finish_reason: null }],
-      });
-      send({
-        id,
-        object: "chat.completion.chunk",
-        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-      });
-      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      controller.close();
+      try {
+        let id = "chatcmpl-pending";
+        send({
+          id,
+          object: "chat.completion.chunk",
+          choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+        });
+        const result = await runTurn(turn, text => {
+          send({
+            id,
+            object: "chat.completion.chunk",
+            choices: [{ index: 0, delta: { content: text }, finish_reason: null }],
+          });
+        });
+        id = `chatcmpl-${completionId(result)}`;
+        send({
+          id,
+          object: "chat.completion.chunk",
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        });
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      } catch (error) {
+        send(errorPayload(error));
+        controller.close();
+      }
     },
   });
   return new Response(stream, {
@@ -179,8 +241,8 @@ export async function handleCursorProtocolRequest(req: Request): Promise<Respons
 
   try {
     const turn = parseCursorHttpBody(body, req.signal);
-    const result = await runTurn(turn);
     if (url.pathname.endsWith("/responses")) {
+      const result = await runTurn(turn);
       return jsonResponse(200, {
         id: completionId(result),
         object: "response",
@@ -189,7 +251,8 @@ export async function handleCursorProtocolRequest(req: Request): Promise<Respons
         output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: result.answer }] }],
       });
     }
-    if (turn.stream) return streamChatCompletions(result);
+    if (turn.stream) return streamChatCompletions(turn);
+    const result = await runTurn(turn);
     return jsonResponse(200, {
       id: `chatcmpl-${completionId(result)}`,
       object: "chat.completion",

@@ -469,6 +469,18 @@ function registerIpc({ logger, stateStore }) {
 
   handle("launcher:doctor", () => runtimeHost.doctor());
   handle("launcher:cancel-turns", () => runtimeHost.cancelBrowserTurns());
+  handle("launcher:install-cursor", async () => {
+    await runtimeHost.installCursor();
+    const state = stateStore.update({ cursorMcpInstalled: true });
+    send("launcher:state-changed", state);
+    return state;
+  });
+  handle("launcher:uninstall-cursor", async () => {
+    await runtimeHost.uninstallCursor();
+    const state = stateStore.update({ cursorMcpInstalled: false });
+    send("launcher:state-changed", state);
+    return state;
+  });
   handle("launcher:bridge-enabled", async (_event, enabled) => {
     const result = await runtimeHost.setBridgeEnabled(enabled === true);
     const state = stateStore.update({

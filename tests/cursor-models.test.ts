@@ -5,6 +5,8 @@ import {
   parseCursorChatGptWebMode,
   requireCursorChatGptWebRoute,
 } from "../src/chatgpt-web-models";
+import { detectChatGptWebCapabilities } from "../src/cursor/capabilities";
+import { resolveChatGptWebModelMode } from "../src/adapters/chatgpt-web/model";
 
 describe("Cursor-facing GPT Web model IDs", () => {
   const plus = { solAvailable: true, proAvailable: false };
@@ -29,5 +31,22 @@ describe("Cursor-facing GPT Web model IDs", () => {
     expect(parseCursorChatGptWebMode("gpt-5.6-sol")).toBeUndefined();
     expect(parseCursorChatGptWebMode("composer-2.5")).toBeUndefined();
     expect(() => requireCursorChatGptWebRoute("gpt-5.5", plus)).toThrow("not enabled");
+  });
+
+  test("High remains slider index 2 and capability detection lists account modes", () => {
+    expect(resolveChatGptWebModelMode("gpt-5.6-sol", "high", {
+      localToolsEnabled: false,
+      solAvailable: true,
+      proAvailable: false,
+    }).uiEffortIndex).toBe(2);
+    const plusCaps = detectChatGptWebCapabilities(plus);
+    expect(plusCaps.defaultMode).toBe("high");
+    expect(plusCaps.highAvailable).toBe(true);
+    expect(plusCaps.extraHighAvailable).toBe(false);
+    expect(plusCaps.modes.find(mode => mode.mode === "pro")?.available).toBe(false);
+    const luna = detectChatGptWebCapabilities({ solAvailable: false, proAvailable: false });
+    expect(luna.lunaOnly).toBe(true);
+    expect(luna.defaultMode).toBe("luna");
+    expect(luna.highAvailable).toBe(false);
   });
 });

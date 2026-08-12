@@ -808,6 +808,22 @@ class RuntimeHost {
     });
   }
 
+  installCursor() {
+    return this.run("install-cursor", ["install-cursor"], {
+      message: "Installing Cursor MCP specialist",
+      successMessage: "Cursor MCP installed",
+      timeoutMs: 30_000,
+    });
+  }
+
+  uninstallCursor() {
+    return this.run("uninstall-cursor", ["uninstall-cursor"], {
+      message: "Removing Cursor MCP specialist",
+      successMessage: "Cursor MCP removed",
+      timeoutMs: 15_000,
+    });
+  }
+
   async uninstallIntegration() {
     const name = "uninstall-integration";
     if (this.currentOperation()) throw new Error(`Another launcher operation is active: ${this.currentOperation()}`);

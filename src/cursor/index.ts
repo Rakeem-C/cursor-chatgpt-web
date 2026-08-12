@@ -4,3 +4,7 @@ export { startCursorProtocolServer, handleCursorProtocolRequest, parseCursorHttp
 export { TaskSessionManager } from "./task-session";
 export { TabPool } from "./tab-pool";
 export { compileDelegationEnvelope } from "./delegation-compiler";
+export { detectChatGptWebCapabilities } from "./capabilities";
+export { inspectCursorIntegration } from "./inspect";
+export { assertBatchRequest } from "./batch";
+export { CURSOR_GPT_WEB_MCP_INSTRUCTIONS } from "./policy";

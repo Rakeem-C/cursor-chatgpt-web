@@ -865,6 +865,9 @@ function SetupSurface({
     await api!.setupCore();
     updateState((await api!.snapshot()).state);
   });
+  const installCursor = () => run(async () => {
+    updateState(await api!.installCursor());
+  });
 
   return (
     <ContentSurface
@@ -904,6 +907,16 @@ function SetupSurface({
           onAction={install}
           repeatable
           title={copy.stepInstall}
+        />
+        <SetupRow
+          action={snapshot.state.cursorMcpInstalled ? copy.cursorInstalled : copy.installCursor}
+          complete={snapshot.state.cursorMcpInstalled === true}
+          description={copy.cursorSpecialistBody}
+          disabled={busy || !browser?.authenticated}
+          index={4}
+          onAction={installCursor}
+          repeatable
+          title={copy.cursorSpecialist}
         />
       </div>
 
@@ -1253,6 +1266,9 @@ function SettingsSurface({
   const [turnsCancelled, setTurnsCancelled] = useState(false);
   const [integrationRemoved, setIntegrationRemoved] = useState(false);
 
+  const [cursorBusy, setCursorBusy] = useState(false);
+  const [cursorRemoved, setCursorRemoved] = useState(false);
+
   const updateLanguage = async (next: Language) => {
     try {
       updateState(await api!.setLanguage(next));
@@ -1348,6 +1364,79 @@ function SettingsSurface({
           <LanguageMenu language={language} onChange={(next) => void updateLanguage(next)} />
         </SettingRow>
       </div>
+
+      <SectionHeading label={copy.cursorSpecialist} spaced />
+      <div className="settings-list">
+        <SettingRow
+          body={`${copy.activeTasks}: ${snapshot.browser?.tabs.filter((tab) => tab.status === "running").length ?? 0}/${snapshot.browser?.maxTabs ?? 5}`}
+          label={copy.activeTasks}
+        >
+          <span className="settings-meta">{snapshot.browser?.tabs.filter((tab) => tab.status === "running").length ?? 0}/{snapshot.browser?.maxTabs ?? 5}</span>
+        </SettingRow>
+      </div>
+      <button
+        className="diagnostic-row"
+        disabled={busy || cursorBusy}
+        onClick={() => {
+          setCursorBusy(true);
+          setError(null);
+          void api!.installCursor()
+            .then(updateState)
+            .catch((cause) => setError(messageOf(cause)))
+            .finally(() => setCursorBusy(false));
+        }}
+        type="button"
+      >
+        <Icon name="mcp" />
+        <span>
+          <strong>{copy.installCursor}</strong>
+          <small>{snapshot.state.cursorMcpInstalled ? copy.cursorInstalled : copy.cursorSpecialistBody}</small>
+        </span>
+        <Icon name="chevron" />
+      </button>
+      <button
+        className="diagnostic-row"
+        disabled={busy || cursorBusy || snapshot.state.cursorMcpInstalled !== true}
+        onClick={() => {
+          setCursorBusy(true);
+          setError(null);
+          void api!.uninstallCursor()
+            .then((state) => {
+              updateState(state);
+              setCursorRemoved(true);
+            })
+            .catch((cause) => setError(messageOf(cause)))
+            .finally(() => setCursorBusy(false));
+        }}
+        type="button"
+      >
+        <Icon name="close" />
+        <span>
+          <strong>{copy.removeCursor}</strong>
+          <small>{cursorRemoved ? copy.cursorRemoved : copy.cursorSpecialistBody}</small>
+        </span>
+        <Icon name="chevron" />
+      </button>
+      <button
+        className="diagnostic-row"
+        disabled={busy || cursorBusy}
+        onClick={() => {
+          setCursorBusy(true);
+          setError(null);
+          void api!.smokeTest()
+            .then(async () => updateState((await api!.snapshot()).state))
+            .catch((cause) => setError(messageOf(cause)))
+            .finally(() => setCursorBusy(false));
+        }}
+        type="button"
+      >
+        <Icon name="activity" />
+        <span>
+          <strong>{copy.testGptWeb}</strong>
+          <small>{copy.testGptWebBody}</small>
+        </span>
+        <Icon name="chevron" />
+      </button>
 
       <SectionHeading label={copy.diagnostics} spaced />
       <button className="diagnostic-row" disabled={busy} onClick={() => void runDoctor()} type="button">

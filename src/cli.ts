@@ -18,7 +18,10 @@ import { formatDoctorReport, runDoctor } from "./doctor";
 import { runChatGptMcpMain } from "./adapters/chatgpt-web/mcp-main";
 import { runCursorChatGptWebMcpServer } from "./cursor/mcp";
 import { installCursorIntegration, uninstallCursorIntegration } from "./cursor/installer";
+import { inspectCursorIntegration } from "./cursor/inspect";
+import { detectChatGptWebCapabilities } from "./cursor/capabilities";
 import { startCursorProtocolServer } from "./cursor/protocol";
+import { getCursorSpecialistRuntime, resetCursorSpecialistRuntime } from "./cursor/runtime";
 import { runCommand } from "./process";
 import { startServer } from "./server";
 import { assertServiceIdle, cancelBrowserTurns, getServiceStatus, installService, restartService, startService, stopService, uninstallService } from "./service";
@@ -38,8 +41,10 @@ Usage:
   cursor-chatgpt-web cursor-mcp
   cursor-chatgpt-web install-cursor [--cursor-home PATH] [--dry-run]
   cursor-chatgpt-web uninstall-cursor [--cursor-home PATH]
+  cursor-chatgpt-web cursor-status [--cursor-home PATH]
+  cursor-chatgpt-web test-gpt-web [--simulate] [--live] [--prompt TEXT]
   cursor-chatgpt-web cursor-serve [--port NUMBER]
-  cursor-chatgpt-web probe [--port NUMBER]
+  cursor-chatgpt-web probe [--port NUMBER] [--checklist]
   cursor-chatgpt-web mcp [--broker-socket PATH]
   cursor-chatgpt-web mcp-codex [--broker-socket PATH]
   cursor-chatgpt-web setup --full --tunnel-id ID --runtime-key-file PATH [options]
@@ -53,9 +58,12 @@ Usage:
 
 Cursor specialist:
   cursor-mcp                   Stdio MCP server: chatgpt_web_turn, chatgpt_web_batch, chatgpt_web_status, chatgpt_web_cancel
-  install-cursor               Write ~/.cursor/mcp.json and ~/.cursor/agents/chatgpt-web.md
+  install-cursor               Write ~/.cursor/mcp.json, agents/chatgpt-web.md, and rules/chatgpt-web.mdc
+  uninstall-cursor             Remove the Cursor MCP specialist without touching ChatGPT login
+  cursor-status                Show Cursor MCP install, account modes, and live specialist slots 0/5
+  test-gpt-web                 Run one High specialist turn (default --simulate; --live uses ChatGPT)
   cursor-serve                 Experimental OpenAI-compatible picker bridge (127.0.0.1)
-  probe                        Capture real Cursor BYOK requests; do not guess protocol shapes
+  probe                        Capture real Cursor BYOK requests; --checklist prints the Phase 0 matrix
   mcp / mcp-codex              Original ChatGPT-side Codex Native connector (full harness)
 
 Setup options:
@@ -354,8 +362,54 @@ async function installCursorCommand(args: string[]): Promise<void> {
     dryRun,
     mcpPath: result.mcpPath,
     agentPath: result.agentPath,
+    rulesPath: result.rulesPath,
     mcpCommand: result.mcpCommand,
     experimentalPicker: result.experimentalPicker,
+  }, null, 2)}\n`);
+}
+
+async function cursorStatusCommand(args: string[]): Promise<void> {
+  const cursorHome = takeOption(args, "--cursor-home");
+  assertNoArgs(args);
+  const cursor = inspectCursorIntegration(cursorHome);
+  let capabilities: ReturnType<typeof detectChatGptWebCapabilities> | undefined;
+  try {
+    const config = loadConfig();
+    capabilities = detectChatGptWebCapabilities({
+      solAvailable: config.solAvailable,
+      proAvailable: config.proAvailable,
+    });
+  } catch {
+    capabilities = undefined;
+  }
+  const simulate = process.env.CURSOR_CHATGPT_WEB_SIMULATE === "1";
+  const specialist = simulate ? getCursorSpecialistRuntime().status() : undefined;
+  stdout.write(`${JSON.stringify({
+    cursor,
+    ...(capabilities ? { capabilities } : { capabilities: "run setup to detect ChatGPT account modes" }),
+    pool: specialist
+      ? { active: specialist.pool.active, max: specialist.pool.max }
+      : { note: "Live 0/5 slots are reported by MCP chatgpt_web_status while cursor-mcp is running" },
+  }, null, 2)}\n`);
+}
+
+async function testGptWebCommand(args: string[]): Promise<void> {
+  const live = takeFlag(args, "--live");
+  const simulate = takeFlag(args, "--simulate") || !live;
+  const prompt = takeOption(args, "--prompt") || "Return a one-sentence confirmation that GPT Web High is reachable.";
+  assertNoArgs(args);
+  if (simulate) process.env.CURSOR_CHATGPT_WEB_SIMULATE = "1";
+  else delete process.env.CURSOR_CHATGPT_WEB_SIMULATE;
+  resetCursorSpecialistRuntime();
+  const result = await getCursorSpecialistRuntime().turn({ prompt, mode: "high" });
+  stdout.write(`${JSON.stringify({
+    simulated: simulate,
+    mode: result.mode,
+    modelId: result.modelId,
+    backendModel: result.backendModel,
+    adapterEffort: result.adapterEffort,
+    jobId: result.jobId,
+    answer: result.answer,
   }, null, 2)}\n`);
 }
 
@@ -448,11 +502,18 @@ async function main(): Promise<void> {
   else if (command === "cursor-mcp") await runCursorChatGptWebMcpServer();
   else if (command === "install-cursor") await installCursorCommand(args);
   else if (command === "uninstall-cursor") await uninstallCursorCommand(args);
+  else if (command === "cursor-status") await cursorStatusCommand(args);
+  else if (command === "test-gpt-web") await testGptWebCommand(args);
   else if (command === "cursor-serve") await cursorServeCommand(args);
   else if (command === "probe") {
     const portRaw = takeOption(args, "--port");
+    const checklist = takeFlag(args, "--checklist");
     assertNoArgs(args);
-    const { startCursorProbeServer } = await import("./cursor/fixtures/capture-server");
+    const { printCursorProbeChecklist, startCursorProbeServer } = await import("./cursor/fixtures/capture-server");
+    if (checklist) {
+      stdout.write(printCursorProbeChecklist());
+      return;
+    }
     startCursorProbeServer(portRaw ? { port: Number(portRaw) } : {});
     await new Promise<void>(() => {});
   }

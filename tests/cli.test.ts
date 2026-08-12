@@ -187,3 +187,34 @@ test("authorized launcher uninstall does not re-probe an already stopped full ru
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("test-gpt-web --simulate returns High / GPT-5.6 Sol without ChatGPT login", async () => {
+  const result = await runCli(["test-gpt-web", "--simulate", "--prompt", "Review isolation."], {
+    ...process.env,
+  });
+  expect(result.exitCode).toBe(0);
+  const payload = JSON.parse(result.stdout) as {
+    simulated: boolean;
+    mode: string;
+    modelId: string;
+    backendModel: string;
+    adapterEffort: string;
+    answer: string;
+  };
+  expect(payload).toMatchObject({
+    simulated: true,
+    mode: "high",
+    modelId: "chatgpt-web-high",
+    backendModel: "gpt-5.6-sol",
+    adapterEffort: "high",
+  });
+  expect(payload.answer).toContain("simulated high gpt-5.6-sol");
+});
+
+test("probe --checklist prints the Phase 0 capture matrix", async () => {
+  const result = await runCli(["probe", "--checklist"], { ...process.env });
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain("Ask mode with custom model chatgpt-web-high");
+  expect(result.stdout).toContain("Subagent Task(model=chatgpt-web-high) from a Grok parent");
+  expect(result.stdout).toContain("Do not invent request shapes");
+});

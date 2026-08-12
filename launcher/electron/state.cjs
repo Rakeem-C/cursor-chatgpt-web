@@ -71,6 +71,7 @@ function readState(filePath) {
       "mcpSetupComplete",
       "mcpRuntimeInstalled",
       "codexRestartRequired",
+      "cursorMcpInstalled",
     ]) {
       if (state[key] !== undefined && typeof state[key] !== "boolean") delete state[key];
     }

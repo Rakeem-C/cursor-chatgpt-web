@@ -187,6 +187,30 @@ describe("Cursor GPT Web specialist sessions", () => {
     expect(pool.activeCount).toBe(0);
   });
 
+  test("the same in-flight jobId reuses its leased tab", () => {
+    const pool = new TabPool(1);
+    const first = pool.lease("job-1");
+    const again = pool.lease("job-1");
+    expect(again.slotId).toBe(first.slotId);
+    expect(pool.activeCount).toBe(1);
+    expect(() => pool.lease("job-2")).toThrow(ChatGptWebTabLimitError);
+    first.release();
+    expect(pool.activeCount).toBe(0);
+  });
+
+  test("Luna-only accounts cannot select Sol High", async () => {
+    const manager = new TaskSessionManager({
+      capabilities: { solAvailable: false, proAvailable: false },
+      runner: fakeRunner(),
+    });
+    await expect(manager.turn({ prompt: "review", mode: "high" })).rejects.toThrow("Luna-only");
+    const luna = await manager.turn({ prompt: "review", mode: "luna" });
+    expect(luna.mode).toBe("luna");
+    expect(luna.modelId).toBe("chatgpt-web-luna");
+    expect(manager.status().capabilities.lunaOnly).toBe(true);
+    expect(manager.status().capabilities.highAvailable).toBe(false);
+  });
+
   test("delegation compiler keeps Cursor as canonical memory", () => {
     const compiled = compileDelegationEnvelope({
       prompt: "Identify why booking confirmation can report success without evidence.",

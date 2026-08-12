@@ -273,3 +273,14 @@ test("launcher checks once at startup and exposes a blue user-triggered update a
   assert.match(i18nSource, /updateAvailable: "Update to"/);
   assert.match(i18nSource, /updateAvailable: "更新至"/);
 });
+
+test("launcher can install the Cursor MCP specialist without replacing Codex setup", () => {
+  assert.match(i18nSource, /installCursor: "Install Cursor MCP"/);
+  assert.match(i18nSource, /installCursor: "安装 Cursor MCP"/);
+  assert.match(appSource, /api!\.installCursor\(\)/);
+  assert.match(appSource, /copy\.cursorSpecialist/);
+  assert.match(preloadSource, /installCursor:[\s\S]*?launcher:install-cursor/);
+  assert.match(preloadSource, /uninstallCursor:[\s\S]*?launcher:uninstall-cursor/);
+  assert.match(electronMain, /runtimeHost\.installCursor\(\)/);
+  assert.match(runtimeSource, /\["install-cursor"\]/);
+});

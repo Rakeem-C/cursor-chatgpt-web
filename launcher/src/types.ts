@@ -20,6 +20,7 @@ export interface LauncherState {
   mcpSetupComplete?: boolean;
   mcpRuntimeInstalled?: boolean;
   codexRestartRequired?: boolean;
+  cursorMcpInstalled?: boolean;
   mcpGuideStep: number;
   sessionRefreshReminderAt: string | null;
 }
@@ -127,6 +128,8 @@ export interface LauncherApi {
   setBridgeEnabled(enabled: boolean): Promise<LauncherState>;
   uninstallIntegration(): Promise<{ cancelled: true } | { cancelled: false; state: LauncherState }>;
   setupCore(): Promise<{ ok: boolean; stdout: string; restartRequired: boolean }>;
+  installCursor(): Promise<LauncherState>;
+  uninstallCursor(): Promise<LauncherState>;
   setupMcp(input: {
     tunnelId?: string;
     runtimeKey?: string;

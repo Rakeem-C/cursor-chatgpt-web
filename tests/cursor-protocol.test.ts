@@ -18,6 +18,23 @@ describe("experimental Cursor HTTP adapter", () => {
     }, new AbortController().signal);
     expect(completions.model).toBe("chatgpt-web-high");
     expect(completions.input).toContain("Review auth.");
+    expect(completions.ignoredToolCount).toBe(0);
+
+    const withImage = parseCursorHttpBody({
+      model: "chatgpt-web-high",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "What is in this screenshot?" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,abc", detail: "high" } },
+        ],
+      }],
+      tools: [{ type: "function", function: { name: "Read" } }],
+      reasoning: { effort: "low" },
+    }, new AbortController().signal);
+    expect(withImage.images?.[0]?.imageUrl).toContain("data:image/png");
+    expect(withImage.ignoredToolCount).toBe(1);
+    expect(withImage.model).toBe("chatgpt-web-high");
 
     const responses = parseCursorHttpBody({
       model: "chatgpt-web-high",

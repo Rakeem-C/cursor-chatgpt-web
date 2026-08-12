@@ -2,6 +2,11 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  CURSOR_GPT_WEB_AUTONOMY_AVOID,
+  CURSOR_GPT_WEB_AUTONOMY_WHEN,
+  cursorGptWebRulesMarkdown,
+} from "./policy";
 
 export const CURSOR_GPT_WEB_AGENT_NAME = "chatgpt-web";
 export const CURSOR_GPT_WEB_MCP_NAME = "chatgpt-web";
@@ -11,11 +16,14 @@ export interface CursorInstallPaths {
   mcpPath: string;
   agentsDir: string;
   agentPath: string;
+  rulesDir: string;
+  rulesPath: string;
 }
 
 export interface CursorInstallResult {
   mcpPath: string;
   agentPath: string;
+  rulesPath: string;
   mcpCommand: string[];
   experimentalPicker: string[];
 }
@@ -33,11 +41,14 @@ export function resolveCursorHome(cursorHome?: string): string {
 export function cursorInstallPaths(cursorHome?: string): CursorInstallPaths {
   const home = resolveCursorHome(cursorHome);
   const agentsDir = join(home, "agents");
+  const rulesDir = join(home, "rules");
   return {
     cursorHome: home,
     mcpPath: join(home, "mcp.json"),
     agentsDir,
     agentPath: join(agentsDir, `${CURSOR_GPT_WEB_AGENT_NAME}.md`),
+    rulesDir,
+    rulesPath: join(rulesDir, `${CURSOR_GPT_WEB_AGENT_NAME}.mdc`),
   };
 }
 
@@ -50,20 +61,10 @@ description: ChatGPT Web specialist (GPT-5.6 Sol High by default). Use for indep
 You are the Cursor-side policy for GPT Web, an expensive senior specialist.
 
 Call GPT Web High when:
-- architecture is ambiguous
-- root cause is difficult
-- several plausible implementations exist
-- security or authorization needs independent review
-- a large refactor needs a second opinion
-- repeated tests are failing without an obvious cause
-- the task benefits from a strong independent reasoning pass
+${CURSOR_GPT_WEB_AUTONOMY_WHEN.map(item => `- ${item}`).join("\n")}
 
 Do not use GPT Web for:
-- trivial edits
-- formatting
-- simple searches
-- obvious one-line fixes
-- tasks you can solve confidently yourself
+${CURSOR_GPT_WEB_AUTONOMY_AVOID.map(item => `- ${item}`).join("\n")}
 
 Delegation rules:
 - Compile a focused envelope (task, goal, relevant files/context, constraints, deliverable).
@@ -110,6 +111,7 @@ export function installCursorIntegration(options: {
 
   if (!options.dryRun) {
     mkdirSync(paths.agentsDir, { recursive: true });
+    mkdirSync(paths.rulesDir, { recursive: true });
     let existing: Record<string, unknown> = {};
     if (existsSync(paths.mcpPath)) {
       const parsed = record(JSON.parse(readFileSync(paths.mcpPath, "utf8")));
@@ -123,17 +125,23 @@ export function installCursorIntegration(options: {
     };
     writeFileSync(paths.mcpPath, `${JSON.stringify(existing, null, 2)}\n`);
     writeFileSync(paths.agentPath, cursorGptWebAgentMarkdown());
+    writeFileSync(paths.rulesPath, cursorGptWebRulesMarkdown());
   }
 
   return {
     mcpPath: paths.mcpPath,
     agentPath: paths.agentPath,
+    rulesPath: paths.rulesPath,
     mcpCommand: command,
     experimentalPicker: experimentalPickerInstructions(options.port),
   };
 }
 
-export function uninstallCursorIntegration(options: { cursorHome?: string } = {}): { mcpPath: string; agentPath: string } {
+export function uninstallCursorIntegration(options: { cursorHome?: string } = {}): {
+  mcpPath: string;
+  agentPath: string;
+  rulesPath: string;
+} {
   const paths = cursorInstallPaths(options.cursorHome);
   if (existsSync(paths.mcpPath)) {
     const parsed = record(JSON.parse(readFileSync(paths.mcpPath, "utf8"))) ?? {};
@@ -143,5 +151,6 @@ export function uninstallCursorIntegration(options: { cursorHome?: string } = {}
     writeFileSync(paths.mcpPath, `${JSON.stringify(parsed, null, 2)}\n`);
   }
   if (existsSync(paths.agentPath)) unlinkSync(paths.agentPath);
-  return { mcpPath: paths.mcpPath, agentPath: paths.agentPath };
+  if (existsSync(paths.rulesPath)) unlinkSync(paths.rulesPath);
+  return { mcpPath: paths.mcpPath, agentPath: paths.agentPath, rulesPath: paths.rulesPath };
 }

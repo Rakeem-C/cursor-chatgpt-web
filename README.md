@@ -63,7 +63,7 @@ The selected model ID is authoritative. Cursor Fast/Effort must never silently c
 ## Quick start
 
 ```bash
-git clone <this-fork> cursor-chatgpt-web
+git clone https://github.com/Rakeem-C/cursor-chatgpt-web.git cursor-chatgpt-web
 cd cursor-chatgpt-web
 bun install --frozen-lockfile
 bun run src/cli.ts setup --browser-only --acknowledge-unofficial
@@ -122,8 +122,10 @@ cursor-chatgpt-web login
 cursor-chatgpt-web doctor
 cursor-chatgpt-web cursor-mcp
 cursor-chatgpt-web install-cursor
+cursor-chatgpt-web cursor-status
+cursor-chatgpt-web test-gpt-web --simulate
 cursor-chatgpt-web cursor-serve
-cursor-chatgpt-web probe
+cursor-chatgpt-web probe --checklist
 cursor-chatgpt-web mcp          # original Codex Native connector
 ```
 
@@ -137,6 +139,7 @@ bun run verify
 ```
 
 - [Cursor architecture](docs/cursor.md)
+- [Acceptance tests](docs/acceptance.md)
 - [Upstream Codex architecture](docs/architecture.md)
 - [Security model](docs/security-model.md)
 

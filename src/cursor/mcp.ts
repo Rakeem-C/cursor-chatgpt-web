@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as z from "zod/v4";
 import { VERSION } from "../version";
 import { isCursorChatGptWebError } from "./errors";
+import { CURSOR_GPT_WEB_MCP_INSTRUCTIONS } from "./policy";
 import { getCursorSpecialistRuntime } from "./runtime";
 import type { SpecialistImage, SpecialistTurnResult } from "./task-session";
 
@@ -62,7 +63,10 @@ function publicTurn(result: SpecialistTurnResult) {
 }
 
 export async function runCursorChatGptWebMcpServer(): Promise<void> {
-  const server = new McpServer({ name: "cursor-chatgpt-web", version: VERSION });
+  const server = new McpServer(
+    { name: "cursor-chatgpt-web", version: VERSION },
+    { instructions: CURSOR_GPT_WEB_MCP_INSTRUCTIONS },
+  );
   const runtime = () => getCursorSpecialistRuntime();
 
   server.registerTool(
