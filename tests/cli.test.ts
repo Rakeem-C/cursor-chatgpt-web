@@ -218,3 +218,54 @@ test("probe --checklist prints the Phase 0 capture matrix", async () => {
   expect(result.stdout).toContain("Subagent Task(model=chatgpt-web-high) from a Grok parent");
   expect(result.stdout).toContain("Do not invent request shapes");
 });
+
+test("probe-subagent prints the Grok and Composer Task() template", async () => {
+  const result = await runCli(["probe-subagent"], { ...process.env });
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain('model="chatgpt-web-high"');
+  expect(result.stdout).toContain("Grok parent");
+  expect(result.stdout).toContain("Composer parent");
+  expect(result.stdout).toContain("MCP chatgpt_web_turn remains the supported path");
+});
+
+test("doctor treats a missing Codex route as a warning for Cursor MCP", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cursor-chatgpt-web-doctor-"));
+  const appHome = join(root, "app");
+  mkdirSync(appHome, { recursive: true });
+  writeFileSync(join(appHome, "config.json"), `${JSON.stringify({
+    version: 3,
+    releaseVersion: "0.2.0",
+    mode: "browser-only",
+    host: "127.0.0.1",
+    port: 17841,
+    contextWindow: 256_000,
+    appName: "Codex Native",
+    browserHost: "managed-chrome",
+    chromeExecutablePath: process.execPath,
+    storageStatePath: join(appHome, "browser", "storage-state.json"),
+    brokerSocketPath: join(appHome, "runtime", "turn-broker.sock"),
+    headed: true,
+    proAvailable: false,
+    autoApproveToolCalls: false,
+    controlToken: "cursor-doctor-control-token-0123456789abcdef",
+    runtimeCommand: [process.execPath],
+  })}\n`);
+  try {
+    const result = await runCli(["doctor", "--json"], {
+      ...process.env,
+      CODEX_HOME: join(root, "codex"),
+      CODEX_CHATGPT_WEB_HOME: appHome,
+      CURSOR_CHATGPT_WEB_HOME: appHome,
+    });
+    const report = JSON.parse(result.stdout) as {
+      checks: Array<{ id: string; status: string; message: string }>;
+    };
+    expect(report.checks.find(check => check.id === "codex")?.status).toBe("warning");
+    expect(report.checks.find(check => check.id === "codex")?.message).toContain("optional for the Cursor MCP specialist");
+    expect(report.checks.find(check => check.id === "proxy")?.status).toBe("warning");
+    expect(report.checks.find(check => check.id === "picker")?.status).toBe("warning");
+    expect(report.checks.find(check => check.id === "native-task")?.status).toBe("warning");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

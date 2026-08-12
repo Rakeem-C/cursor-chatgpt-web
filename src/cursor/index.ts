@@ -8,3 +8,6 @@ export { detectChatGptWebCapabilities } from "./capabilities";
 export { inspectCursorIntegration } from "./inspect";
 export { assertBatchRequest } from "./batch";
 export { CURSOR_GPT_WEB_MCP_INSTRUCTIONS } from "./policy";
+export { parseToolCalls } from "./tool-protocol";
+export { reviewCapturedFixtures } from "./fixtures/review";
+export { printCursorSubagentProbeReport } from "./subagent-probe";

@@ -5,7 +5,7 @@ import { VERSION } from "../version";
 import { isCursorChatGptWebError } from "./errors";
 import { CURSOR_GPT_WEB_MCP_INSTRUCTIONS } from "./policy";
 import { getCursorSpecialistRuntime } from "./runtime";
-import type { SpecialistImage, SpecialistTurnResult } from "./task-session";
+import type { SpecialistImage, SpecialistToolResult, SpecialistToolSpec, SpecialistTurnResult } from "./task-session";
 
 const modeSchema = z.enum(["instant", "medium", "high", "extra-high", "pro", "luna"]).optional();
 const imageSchema = z.object({
@@ -20,6 +20,17 @@ const metadataSchema = z.object({
   parentModel: z.string().max(200).optional(),
   constraints: z.array(z.string().max(1_000)).max(32).optional(),
   deliverable: z.string().max(8_000).optional(),
+});
+const toolSpecSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(4_000).optional(),
+  parameters: z.record(z.string(), z.unknown()).optional(),
+});
+const toolResultSchema = z.object({
+  id: z.string().min(1).max(200).optional(),
+  name: z.string().min(1).max(200).optional(),
+  content: z.string().max(500_000),
+  isError: z.boolean().optional(),
 });
 
 function mcpResult(value: Record<string, unknown>, isError = false) {
@@ -59,6 +70,8 @@ function publicTurn(result: SpecialistTurnResult) {
     answer: result.answer,
     reasoning: result.reasoning,
     commentary: result.commentary,
+    awaitingTools: result.awaitingTools,
+    toolCalls: result.toolCalls,
   };
 }
 
@@ -78,24 +91,31 @@ export async function runCursorChatGptWebMcpServer(): Promise<void> {
         "Use for ambiguous architecture, hard root cause, independent review, or a second opinion.",
         "Do not use for trivial edits, formatting, simple search, or one-line fixes.",
         "Cursor must keep Read, Search, Shell, ApplyPatch, git, and tests. Omit threadId for a fresh Temporary Chat; pass threadId only to resume an explicit specialist thread.",
+        "If the result has awaitingTools=true, run the toolCalls locally and call again with the same jobId and toolResults. That continues the same Temporary Chat.",
       ].join(" "),
       inputSchema: {
-        prompt: z.string().min(1).max(500_000),
+        prompt: z.string().min(1).max(500_000).optional(),
         mode: modeSchema,
         threadId: z.string().min(1).max(200).optional(),
+        jobId: z.string().min(1).max(200).optional(),
         images: z.array(imageSchema).max(10).optional(),
         metadata: metadataSchema.optional(),
+        tools: z.array(toolSpecSchema).max(32).optional(),
+        toolResults: z.array(toolResultSchema).max(32).optional(),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ prompt, mode, threadId, images, metadata }) => {
+    async ({ prompt, mode, threadId, jobId, images, metadata, tools, toolResults }) => {
       try {
         const result = await runtime().turn({
-          prompt,
+          ...(prompt ? { prompt } : {}),
           ...(mode ? { mode } : {}),
           ...(threadId ? { threadId } : {}),
+          ...(jobId ? { jobId } : {}),
           ...(images ? { images: images as SpecialistImage[] } : {}),
           ...(metadata ? { metadata } : {}),
+          ...(tools ? { tools: tools as SpecialistToolSpec[] } : {}),
+          ...(toolResults ? { toolResults: toolResults as SpecialistToolResult[] } : {}),
         });
         return mcpResult(publicTurn(result));
       } catch (error) {

@@ -22,6 +22,7 @@ export const CURSOR_GPT_WEB_MCP_INSTRUCTIONS = [
   "Omit threadId for a fresh Temporary Chat per independent job. Pass threadId only to resume an explicit specialist thread.",
   "Use chatgpt_web_batch for independent parallel reviews (max 5). A sixth concurrent session fails with chatgpt_web_tab_limit.",
   "Cursor keeps Read, Search, Shell, ApplyPatch, git, and tests. GPT Web reasons; you act.",
+  "If chatgpt_web_turn returns awaitingTools, execute those toolCalls yourself, then call chatgpt_web_turn again with the same jobId and toolResults to continue the same Temporary Chat.",
   "Do not assume Task(model=chatgpt-web-high) works until a Phase 0 probe proves Cursor honors the custom child model.",
   `Call GPT Web High when: ${CURSOR_GPT_WEB_AUTONOMY_WHEN.join("; ")}.`,
   `Do not use GPT Web for: ${CURSOR_GPT_WEB_AUTONOMY_AVOID.join("; ")}.`,
@@ -52,5 +53,6 @@ Delegation rules:
 - Pass \`threadId\` only when the user asked to continue a named specialist thread.
 - Use \`chatgpt_web_batch\` for independent parallel reviews (max 5).
 - You keep Read, Search, Shell, ApplyPatch, git, and tests. GPT Web reasons; you act.
+- If a turn returns \`awaitingTools\`, run those \`toolCalls\` yourself and call \`chatgpt_web_turn\` again with the same \`jobId\` and \`toolResults\`. That continues the same Temporary Chat.
 `;
 }

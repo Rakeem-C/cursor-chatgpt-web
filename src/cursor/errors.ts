@@ -32,6 +32,16 @@ export class UnknownCursorModelError extends CursorChatGptWebError {
   }
 }
 
+export class ChatGptWebSessionLostError extends CursorChatGptWebError {
+  constructor(jobId: string) {
+    super(
+      `ChatGPT Temporary Chat for job ${jobId} was lost; retry as a new job`,
+      { status: 410, code: "chatgpt_web_session_lost", retryable: true },
+    );
+    this.name = "ChatGptWebSessionLostError";
+  }
+}
+
 export function isCursorChatGptWebError(error: unknown): error is CursorChatGptWebError {
   return error instanceof CursorChatGptWebError;
 }

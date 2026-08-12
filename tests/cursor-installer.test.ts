@@ -13,7 +13,7 @@ test("install-cursor writes MCP and the specialist agent without clobbering othe
       mcpServers: Record<string, { command: string; args: string[] }>;
     };
     expect(mcp.mcpServers["chatgpt-web"]?.args.at(-1)).toBe("cursor-mcp");
-    expect(readFileSync(first.agentPath, "utf8")).toContain("Call GPT Web High when:");
+    expect(readFileSync(first.agentPath, "utf8")).toContain("awaitingTools");
     expect(readFileSync(first.agentPath, "utf8")).toBe(cursorGptWebAgentMarkdown());
     expect(readFileSync(first.rulesPath, "utf8")).toContain("chatgpt_web_turn");
     expect(first.experimentalPicker.some(line => line.includes("chatgpt-web-high"))).toBe(true);

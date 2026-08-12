@@ -1,5 +1,11 @@
 import type { ChatGptWebPromptImage } from "../adapters/chatgpt-web/prompt";
 import type { CursorChatGptWebMode } from "../chatgpt-web-models";
+import {
+  toolProtocolSection,
+  toolResultsSection,
+  type SpecialistToolResult,
+  type SpecialistToolSpec,
+} from "./tool-protocol";
 
 export interface DelegationMetadata {
   task?: string;
@@ -31,6 +37,9 @@ export interface CompileDelegationInput {
   threadHistory?: readonly ThreadMessage[];
   images?: readonly SpecialistImage[];
   metadata?: DelegationMetadata;
+  tools?: readonly SpecialistToolSpec[];
+  toolResults?: readonly SpecialistToolResult[];
+  continuation?: boolean;
 }
 
 export interface CompiledDelegation {
@@ -64,7 +73,19 @@ function historySection(history: readonly ThreadMessage[] | undefined): string |
  */
 export function compileDelegationEnvelope(input: CompileDelegationInput): CompiledDelegation {
   const prompt = input.prompt.trim();
-  if (!prompt) throw new Error("chatgpt_web_turn requires a non-empty prompt");
+  const toolResults = toolResultsSection(input.toolResults);
+  if (!prompt && !toolResults) throw new Error("chatgpt_web_turn requires a non-empty prompt");
+
+  if (input.continuation) {
+    const parts = [
+      "Continue in this same Temporary Chat. Cursor still owns the repository, filesystem, shell, edits, tests, and approvals.",
+      "If you need another Cursor tool, emit tool_calls JSON only. Otherwise return the final review and do not implement.",
+      historySection(input.threadHistory),
+      toolResults,
+      section("FOLLOW-UP", prompt || undefined),
+    ].filter((part): part is string => Boolean(part));
+    return { text: parts.join("\n\n"), images: [] };
+  }
 
   const parts = [
     "You are GPT Web, an independent reasoning specialist invoked from Cursor.",
@@ -72,6 +93,7 @@ export function compileDelegationEnvelope(input: CompileDelegationInput): Compil
     "Do not claim you inspected, edited, or ran anything unless that evidence is in this envelope.",
     "Return a concrete review: root cause, risk, safest fix, and tests. Do not implement.",
     `Selected ChatGPT mode is authoritative: ${input.displayName} (${input.modelId}). Do not switch modes.`,
+    toolProtocolSection(input.tools),
     section("TASK", input.metadata?.task),
     section("GOAL", input.metadata?.goal),
     section("REPO", input.metadata?.repo),

@@ -72,6 +72,7 @@ Delegation rules:
 - Pass threadId only when the user asked to continue a named specialist thread.
 - Use chatgpt_web_batch for independent parallel reviews (max 5).
 - You keep Read, Search, Shell, ApplyPatch, git, and tests. GPT Web reasons; you act.
+- If a turn returns awaitingTools, run those toolCalls yourself and call chatgpt_web_turn again with the same jobId and toolResults.
 `;
 }
 

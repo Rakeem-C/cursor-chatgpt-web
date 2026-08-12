@@ -130,7 +130,7 @@ export async function runDoctor(): Promise<DoctorReport> {
       checks.push({ id: "chrome", status: "ok", message: `Chrome executable found: ${config.chromeExecutablePath}` });
     }
     if (!browserLoginStateExists(config)) {
-      checks.push({ id: "login", status: "error", message: "ChatGPT login state is missing or unverified; run `codex-chatgpt-web login`" });
+      checks.push({ id: "login", status: "error", message: "ChatGPT login state is missing or unverified; run `cursor-chatgpt-web login`" });
     } else if (!secureFile(config.storageStatePath)) {
       checks.push({ id: "login", status: "error", message: `ChatGPT login state is readable by other users: ${config.storageStatePath}` });
     } else if (!secureFile(loginVerificationMarkerPath(config.storageStatePath))) {
@@ -138,15 +138,6 @@ export async function runDoctor(): Promise<DoctorReport> {
     } else {
       checks.push({ id: "login", status: "ok", message: "ChatGPT login state has authenticated browser evidence" });
     }
-  }
-
-  const codex = inspectCodexIntegration();
-  if (!codex.installed) {
-    checks.push({ id: "codex", status: "error", message: "Codex model route is not installed" });
-  } else if (codex.errors.length > 0) {
-    checks.push({ id: "codex", status: "error", message: "Codex integration is inconsistent", detail: codex.errors.join("; ") });
-  } else {
-    checks.push({ id: "codex", status: "ok", message: "Codex native model route is installed" });
   }
 
   const cursor = inspectCursorIntegration();
@@ -158,6 +149,20 @@ export async function runDoctor(): Promise<DoctorReport> {
         message: "Cursor MCP specialist is not installed; run `cursor-chatgpt-web install-cursor`",
         detail: cursor.errors.join("; ") || undefined,
       });
+
+  const codex = inspectCodexIntegration();
+  if (!codex.installed) {
+    checks.push({
+      id: "codex",
+      status: "warning",
+      message: "Codex model route is not installed (optional for the Cursor MCP specialist)",
+    });
+  } else if (codex.errors.length > 0) {
+    checks.push({ id: "codex", status: "error", message: "Codex integration is inconsistent", detail: codex.errors.join("; ") });
+  } else {
+    checks.push({ id: "codex", status: "ok", message: "Codex native model route is installed" });
+  }
+  const requireCodexRuntime = codex.installed;
 
   const detected = detectChatGptWebCapabilities({
     solAvailable: config.solAvailable,
@@ -173,6 +178,21 @@ export async function runDoctor(): Promise<DoctorReport> {
         : "ChatGPT High is available; default specialist is chatgpt-web-high",
     detail: detected.modes.filter(mode => mode.available).map(mode => mode.cursorId).join(", "),
   });
+  checks.push({
+    id: "picker",
+    status: detected.pickerMode === "supported" ? "ok" : "warning",
+    message: detected.pickerMode === "supported"
+      ? "Captured Cursor fixtures prove the experimental picker route"
+      : "Model picker stays experimental until `cursor-chatgpt-web probe` captures chatgpt-web-* traffic",
+    detail: detected.fixtures.notes.join(" ") || undefined,
+  });
+  checks.push({
+    id: "native-task",
+    status: detected.nativeTaskMode === "supported" ? "ok" : "warning",
+    message: detected.nativeTaskMode === "supported"
+      ? "Captured Cursor fixtures prove Task(model=chatgpt-web-high)"
+      : "Native Task(model=chatgpt-web-high) stays probe-only; MCP remains the supported path",
+  });
 
   const service = getServiceStatus();
   if (config.browserHost === "launcher") {
@@ -187,11 +207,24 @@ export async function runDoctor(): Promise<DoctorReport> {
   } else if (!service.supported) {
     checks.push({ id: "service", status: "warning", message: "Managed service is unavailable on this OS; keep `serve` running manually" });
   } else if (!service.installed || !service.loaded) {
-    checks.push({ id: "service", status: "error", message: "macOS background service is not installed and loaded" });
+    checks.push({
+      id: "service",
+      status: requireCodexRuntime ? "error" : "warning",
+      message: requireCodexRuntime
+        ? "macOS background service is not installed and loaded"
+        : "macOS background service is not installed (optional for the Cursor MCP specialist)",
+    });
   } else {
     checks.push({ id: "service", status: "ok", message: "macOS background service is loaded" });
   }
-  checks.push(await proxyCheck(config));
+  const proxy = await proxyCheck(config);
+  checks.push(!requireCodexRuntime && proxy.status === "error"
+    ? {
+        ...proxy,
+        status: "warning",
+        message: `${proxy.message} (optional unless you use the Codex Responses proxy)`,
+      }
+    : proxy);
 
   if (config.mode === "full") {
     const settings = config.tunnel!;

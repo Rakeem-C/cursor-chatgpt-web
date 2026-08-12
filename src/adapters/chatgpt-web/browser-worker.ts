@@ -287,6 +287,20 @@ export interface BrowserTurn {
   /** Require and remove the private Luna checkpoint tail from the visible Markdown stream. */
   captureLunaCheckpoint?: boolean;
   onLunaCheckpoint?: (captured: CapturedChatGptLunaCheckpoint) => void;
+  /**
+   * Cursor specialist only. Codex must omit this so every turn still opens a fresh
+   * Temporary Chat document. When set, a later turn with the same key reuses the page.
+   */
+  sessionHoldKey?: string;
+  /** Keep the managed Chrome page open after this turn so tool roundtrips can continue. */
+  keepSessionHold?: boolean;
+}
+
+export function shouldRetainManagedBrowserSession(
+  turn: Pick<BrowserTurn, "sessionHoldKey" | "keepSessionHold">,
+  browserHost: ResolvedBrowserConfig["browserHost"],
+): boolean {
+  return Boolean(turn.sessionHoldKey?.trim() && turn.keepSessionHold === true && browserHost !== "launcher");
 }
 
 export interface ResolvedBrowserConfig {
@@ -734,6 +748,7 @@ export class ChatGptBrowserWorker {
   private launcherHelper?: LauncherBrowserHelperClient;
   private maintenanceTail: Promise<void> = Promise.resolve();
   private readonly activeRuns = new Map<string, Promise<string>>();
+  private readonly sessionPages = new Map<string, Page>();
 
   private constructor(private readonly config: ResolvedBrowserConfig) {}
 
@@ -756,6 +771,18 @@ export class ChatGptBrowserWorker {
       if (this.activeRuns.get(turn.traceId) === run) this.activeRuns.delete(turn.traceId);
     }).catch(() => {});
     return run;
+  }
+
+  async releaseSessionHold(key: string): Promise<void> {
+    const page = this.sessionPages.get(key);
+    this.sessionPages.delete(key);
+    if (page && !page.isClosed()) {
+      await page.close().catch(error => {
+        console.error(
+          `[chatgpt-web] failed to close held Temporary Chat ${key}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    }
   }
 
   verifyConnector(): Promise<string> {
@@ -1822,8 +1849,15 @@ export class ChatGptBrowserWorker {
       const deadline = this.config.turnTimeoutMs === undefined
         ? undefined
         : Date.now() + this.config.turnTimeoutMs;
+      const holdKey = turn.sessionHoldKey?.trim();
+      const heldPage = holdKey ? this.sessionPages.get(holdKey) : undefined;
+      if (heldPage?.isClosed()) {
+        this.sessionPages.delete(holdKey!);
+        throw new Error("ChatGPT Temporary Chat session was lost; the browser tab closed");
+      }
       const page = await this.runStage(turn.traceId, "browser_page", browserStageTimeouts.browserPage, async (abortSignal) => {
         if (maintenancePage) return maintenancePage;
+        if (heldPage) return heldPage;
         if (!launcherSurfaceId) {
           const managed = await this.pageForNewTurn();
           if (abortSignal.aborted) {
@@ -2054,13 +2088,19 @@ export class ChatGptBrowserWorker {
       throw error;
     } finally {
       prepared.release();
-      if (turnConnection) {
+      const retain = shouldRetainManagedBrowserSession(turn, this.config.browserHost)
+        && Boolean(managedPage)
+        && !turnConnection;
+      if (retain && turn.sessionHoldKey && managedPage && !managedPage.isClosed()) {
+        this.sessionPages.set(turn.sessionHoldKey, managedPage);
+      } else if (turnConnection) {
         await turnConnection.close().catch(error => {
           console.error(
             `[chatgpt-web] failed to release launcher browser connection for ${turn.traceId}: ${error instanceof Error ? error.message : String(error)}`,
           );
         });
       } else if (managedPage && !managedPage.isClosed()) {
+        if (turn.sessionHoldKey) this.sessionPages.delete(turn.sessionHoldKey);
         await managedPage.close().catch(error => {
           console.error(
             `[chatgpt-web] failed to close managed browser tab for ${turn.traceId}: ${error instanceof Error ? error.message : String(error)}`,

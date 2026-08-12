@@ -226,6 +226,7 @@ describe("Cursor GPT Web specialist sessions", () => {
     });
     expect(compiled.text).toContain("Cursor owns the repository");
     expect(compiled.text).toContain("Do not implement.");
+    expect(compiled.text).toContain("TOOL PROTOCOL");
     expect(compiled.text).toContain("CURRENT ASSIGNMENT");
     expect(compiled.text).toContain("no provider mutation");
   });
