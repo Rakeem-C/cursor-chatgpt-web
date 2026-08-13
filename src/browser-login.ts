@@ -268,6 +268,17 @@ export function loginVerificationMarkerPath(storageStatePath: string): string {
   return `${storageStatePath}.verified.json`;
 }
 
+export function applyCapturedLoginCapabilities<T extends { solAvailable: boolean; proAvailable: boolean }>(
+  config: T,
+  login: Pick<BrowserLoginResult, "solAvailable" | "proAvailable">,
+): T {
+  return {
+    ...config,
+    solAvailable: login.solAvailable === true,
+    proAvailable: login.solAvailable === true && login.proAvailable === true,
+  };
+}
+
 function writeLoginCaptureMarker(
   storageStatePath: string,
   capabilities: ChatGptWebAccountCapabilities,

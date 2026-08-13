@@ -20,6 +20,9 @@ const metadataSchema = z.object({
   parentModel: z.string().max(200).optional(),
   constraints: z.array(z.string().max(1_000)).max(32).optional(),
   deliverable: z.string().max(8_000).optional(),
+  role: z.string().min(1).max(200).optional(),
+  allowedPaths: z.array(z.string().min(1).max(1_000)).max(64).optional(),
+  forbiddenPaths: z.array(z.string().min(1).max(1_000)).max(64).optional(),
 });
 const toolSpecSchema = z.object({
   name: z.string().min(1).max(200),
@@ -71,7 +74,9 @@ function publicTurn(result: SpecialistTurnResult) {
     reasoning: result.reasoning,
     commentary: result.commentary,
     awaitingTools: result.awaitingTools,
+    resumeRequired: result.resumeRequired,
     toolCalls: result.toolCalls,
+    ...(result.role ? { role: result.role } : {}),
   };
 }
 
@@ -91,7 +96,9 @@ export async function runCursorChatGptWebMcpServer(): Promise<void> {
         "Use for ambiguous architecture, hard root cause, independent review, or a second opinion.",
         "Do not use for trivial edits, formatting, simple search, or one-line fixes.",
         "Cursor must keep Read, Search, Shell, ApplyPatch, git, and tests. Omit threadId for a fresh Temporary Chat; pass threadId only to resume an explicit specialist thread.",
+        "Set metadata.role for a named lease; threadId defaults to role:<role>. A second live job with the same role fails with lease_blocked.",
         "If the result has awaitingTools=true, run the toolCalls locally and call again with the same jobId and toolResults. That continues the same Temporary Chat.",
+        "A sixth concurrent turn queues unless queue=false, which keeps chatgpt_web_tab_limit.",
       ].join(" "),
       inputSchema: {
         prompt: z.string().min(1).max(500_000).optional(),
@@ -102,10 +109,11 @@ export async function runCursorChatGptWebMcpServer(): Promise<void> {
         metadata: metadataSchema.optional(),
         tools: z.array(toolSpecSchema).max(32).optional(),
         toolResults: z.array(toolResultSchema).max(32).optional(),
+        queue: z.boolean().optional(),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ prompt, mode, threadId, jobId, images, metadata, tools, toolResults }) => {
+    async ({ prompt, mode, threadId, jobId, images, metadata, tools, toolResults, queue }) => {
       try {
         const result = await runtime().turn({
           ...(prompt ? { prompt } : {}),
@@ -116,6 +124,7 @@ export async function runCursorChatGptWebMcpServer(): Promise<void> {
           ...(metadata ? { metadata } : {}),
           ...(tools ? { tools: tools as SpecialistToolSpec[] } : {}),
           ...(toolResults ? { toolResults: toolResults as SpecialistToolResult[] } : {}),
+          ...(queue === undefined ? {} : { queue }),
         });
         return mcpResult(publicTurn(result));
       } catch (error) {
@@ -130,7 +139,7 @@ export async function runCursorChatGptWebMcpServer(): Promise<void> {
       title: "Ask several GPT Web specialists",
       description: [
         "Run up to five isolated GPT Web Temporary Chats in parallel and return all results.",
-        "Each task is a separate job unless it sets threadId. A sixth concurrent session fails with chatgpt_web_tab_limit.",
+        "Each task is a separate job unless it sets threadId. A sixth batch task fails with chatgpt_web_tab_limit; turns queue instead.",
       ].join(" "),
       inputSchema: {
         mode: modeSchema,
@@ -169,7 +178,7 @@ export async function runCursorChatGptWebMcpServer(): Promise<void> {
     "chatgpt_web_status",
     {
       title: "GPT Web specialist status",
-      description: "Show ChatGPT account capabilities, live browser slots (n/5), running jobs, and explicit threads.",
+      description: "Show ChatGPT account capabilities, live browser slots (n/5), named leases, queued jobs, spawn UX, and jobs blocked waiting for the parent to resume tools.",
       inputSchema: {},
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
@@ -180,7 +189,7 @@ export async function runCursorChatGptWebMcpServer(): Promise<void> {
     "chatgpt_web_cancel",
     {
       title: "Cancel GPT Web work",
-      description: "Abort a running specialist job, every job on a threadId, or all live GPT Web sessions.",
+      description: "Abort a running, awaiting-tools, or queued specialist job, every job on a threadId, or all live GPT Web sessions.",
       inputSchema: {
         jobId: z.string().min(1).max(200).optional(),
         threadId: z.string().min(1).max(200).optional(),

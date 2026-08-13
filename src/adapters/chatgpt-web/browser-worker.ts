@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
+import { launchManagedChromeOverCdp, shouldLaunchChromeOverCdp } from "../../chrome-cdp-launch";
 import {
   atomicWriteFile,
   CHATGPT_CONNECTOR_NAME,
@@ -745,6 +746,7 @@ export class ChatGptBrowserWorker {
   private context?: BrowserContext;
   private page?: Page;
   private managedBrowserReady?: Promise<{ browser: Browser; context: BrowserContext }>;
+  private managedChromeClose?: () => Promise<void>;
   private launcherHelper?: LauncherBrowserHelperClient;
   private maintenanceTail: Promise<void> = Promise.resolve();
   private readonly activeRuns = new Map<string, Promise<string>>();
@@ -823,14 +825,17 @@ export class ChatGptBrowserWorker {
     await Promise.allSettled([...this.activeRuns.values()]);
     await this.maintenanceTail;
     const browser = this.browser;
+    const managedChromeClose = this.managedChromeClose;
     this.browser = undefined;
     this.context = undefined;
     this.page = undefined;
     this.managedBrowserReady = undefined;
+    this.managedChromeClose = undefined;
     // For connectOverCDP, Playwright implements Browser.close as a transport disconnect; it does
     // not close the launcher-owned Electron process. Always release that connection and its
     // artifact directory instead of leaking one per timeout/helper lifecycle.
-    if (browser) await browser.close();
+    if (managedChromeClose) await managedChromeClose();
+    else if (browser) await browser.close();
   }
 
   private async runStage<T>(
@@ -870,18 +875,8 @@ export class ChatGptBrowserWorker {
       this.page = connection.page;
       return this.page;
     }
-    if (!existsSync(this.config.storageStatePath) || !existsSync(loginVerificationMarkerPath(this.config.storageStatePath))) {
-      throw new Error(`ChatGPT web login state is missing: ${this.config.storageStatePath}`);
-    }
-    if (!existsSync(this.config.chromeExecutablePath)) {
-      throw new Error(`Configured Chrome executable does not exist: ${this.config.chromeExecutablePath}`);
-    }
-    this.browser = await chromium.launch({
-      executablePath: this.config.chromeExecutablePath,
-      headless: !this.config.headed,
-    });
-    this.context = await this.browser.newContext({ storageState: this.config.storageStatePath });
-    this.page = await this.context.newPage();
+    const { context } = await this.ensureManagedBrowser();
+    this.page = await context.newPage();
     return this.page;
   }
 
@@ -894,10 +889,21 @@ export class ChatGptBrowserWorker {
       if (!existsSync(this.config.chromeExecutablePath)) {
         throw new Error(`Configured Chrome executable does not exist: ${this.config.chromeExecutablePath}`);
       }
-      const browser = await chromium.launch({
-        executablePath: this.config.chromeExecutablePath,
-        headless: !this.config.headed,
-      });
+      let browser: Browser;
+      if (shouldLaunchChromeOverCdp()) {
+        const session = await launchManagedChromeOverCdp({
+          chromeExecutablePath: this.config.chromeExecutablePath,
+          headed: this.config.headed,
+          timeoutMs: browserStageTimeouts.browserPage,
+        });
+        this.managedChromeClose = session.close;
+        browser = session.browser;
+      } else {
+        browser = await chromium.launch({
+          executablePath: this.config.chromeExecutablePath,
+          headless: !this.config.headed,
+        });
+      }
       const context = await browser.newContext({ storageState: this.config.storageStatePath });
       this.browser = browser;
       this.context = context;

@@ -96,7 +96,7 @@ Need a file.
     expect(runner.holdReleased).toEqual(["job-tools"]);
   });
 
-  test("a sixth concurrent job still fails while five jobs await tools", async () => {
+  test("a sixth concurrent job queues while five jobs await tools", async () => {
     const runner = fakeRunner({
       answers: Array.from({ length: 6 }, () => '{"tool_calls":[{"id":"call_1","name":"Read","arguments":{"path":"a.ts"}}]}'),
     });
@@ -104,9 +104,18 @@ Need a file.
     for (let index = 0; index < 5; index += 1) {
       const result = await manager.turn({ prompt: `job ${index}`, jobId: `held-${index}` });
       expect(result.awaitingTools).toBe(true);
+      expect(result.resumeRequired).toBe(true);
     }
     expect(manager.status().pool.active).toBe(5);
-    await expect(manager.turn({ prompt: "sixth" })).rejects.toBeInstanceOf(ChatGptWebTabLimitError);
+    const sixth = manager.turn({ prompt: "sixth", jobId: "queued-sixth" });
+    await Promise.resolve();
+    expect(manager.status().queue.depth).toBe(1);
+    await expect(manager.turn({ prompt: "no-queue", queue: false })).rejects.toBeInstanceOf(ChatGptWebTabLimitError);
+    manager.cancel({ jobId: "held-0" });
+    const queued = await sixth;
+    expect(queued.jobId).toBe("queued-sixth");
+    expect(queued.awaitingTools).toBe(true);
+    expect(manager.status().pool.active).toBe(5);
   });
 
   test("cancel releases a job that is waiting for tool results", async () => {

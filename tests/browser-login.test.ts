@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { browserLoginStateExists, loginToChatGpt, loginVerificationMarkerPath } from "../src/browser-login";
+import { applyCapturedLoginCapabilities, browserLoginStateExists, loginToChatGpt, loginVerificationMarkerPath } from "../src/browser-login";
 import { CHATGPT_TEMPORARY_CHAT_URL } from "../src/chatgpt-session";
 import { defaultConfig } from "../src/config";
 
@@ -14,6 +14,26 @@ function processIsRunning(pid: number): boolean {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }
+
+test("login capture writes Sol/Pro onto the durable config used by Cursor MCP", () => {
+  const luna = applyCapturedLoginCapabilities(
+    { solAvailable: true, proAvailable: true },
+    { solAvailable: false, proAvailable: false },
+  );
+  expect(luna).toEqual({ solAvailable: false, proAvailable: false });
+
+  const plus = applyCapturedLoginCapabilities(
+    { solAvailable: false, proAvailable: false },
+    { solAvailable: true, proAvailable: false },
+  );
+  expect(plus).toEqual({ solAvailable: true, proAvailable: false });
+
+  const pro = applyCapturedLoginCapabilities(
+    { solAvailable: false, proAvailable: false },
+    { solAvailable: true, proAvailable: true },
+  );
+  expect(pro).toEqual({ solAvailable: true, proAvailable: true });
+});
 
 test("login uses one normal Chrome on a non-automation loopback port and never launches a verifier browser", async () => {
   if (process.platform === "win32") return;

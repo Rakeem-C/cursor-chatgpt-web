@@ -205,7 +205,13 @@ export async function runDoctor(): Promise<DoctorReport> {
         }
       : { id: "service", status: "ok", message: "Launcher owns the background runtime" });
   } else if (!service.supported) {
-    checks.push({ id: "service", status: "warning", message: "Managed service is unavailable on this OS; keep `serve` running manually" });
+    checks.push({
+      id: "service",
+      status: requireCodexRuntime ? "warning" : "ok",
+      message: requireCodexRuntime
+        ? "Managed service is unavailable on this OS; keep `serve` running manually for the Codex proxy"
+        : "Managed OS service is not required for the Cursor MCP specialist",
+    });
   } else if (!service.installed || !service.loaded) {
     checks.push({
       id: "service",

@@ -5,8 +5,8 @@ import { timingSafeEqual } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { stdin, stdout } from "node:process";
-import { checkBrowserEngine, loginToChatGpt } from "./browser-login";
-import { CHATGPT_CONNECTOR_NAME, defaultConfig, getConfigDir, getConfigPath, loadConfig, loadConfigForSetup } from "./config";
+import { applyCapturedLoginCapabilities, checkBrowserEngine, loginToChatGpt } from "./browser-login";
+import { CHATGPT_CONNECTOR_NAME, defaultConfig, getConfigDir, getConfigPath, loadConfig, loadConfigForSetup, saveConfig } from "./config";
 import { inspectLauncherBrowserHost, readLauncherBrowserHostDescriptor } from "./launcher-browser-host";
 import {
   activateCodexIntegration,
@@ -168,7 +168,9 @@ async function loginCommand(args: string[]): Promise<void> {
       throw new Error("ChatGPT login is owned by the launcher; open Codex Web GPT and use its Sign in step");
     }
     const result = await loginToChatGpt(config);
+    saveConfig(applyCapturedLoginCapabilities(config, result));
     stdout.write(`ChatGPT login stored at ${result.storageStatePath}\n`);
+    stdout.write(`Account capabilities: sol=${result.solAvailable} pro=${result.proAvailable}\n`);
     return;
   }
 

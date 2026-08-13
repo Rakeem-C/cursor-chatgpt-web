@@ -30,10 +30,23 @@ The parent compiles a focused envelope and calls MCP. GPT Web reasons. Cursor ke
 | Event | Temporary Chat |
 | --- | --- |
 | New MCP job, no threadId | Fresh chat, released when the job finishes |
+| Named `metadata.role`, no threadId | Logical thread `role:<role>`; physical tab recycled |
 | Same in-flight jobId, including tool roundtrips | Reuse the leased tab and held page |
 | Explicit threadId | Logical specialist history; physical tab recycled |
 | `chatgpt_web_batch` task | Isolated chat per task id |
-| Sixth concurrent job | `chatgpt_web_tab_limit` |
+| Sixth concurrent turn | FIFO queue (unless `queue=false`) |
+| Sixth batch task or `queue=false` | `chatgpt_web_tab_limit` |
+| Second live job with the same role | `lease_blocked` |
+
+## Supported V2
+
+Named role leases, a FIFO queue when all five tabs are busy, and a tool loop the parent must resume.
+
+- `metadata.role` claims a specialist lease. `threadId` defaults to `role:<role>`.
+- A sixth **turn** queues. `chatgpt_web_batch` of 6 and `queue=false` still return `chatgpt_web_tab_limit`.
+- `awaitingTools` keeps the tab. `status` exposes `resumeRequired`, `blockedOnParent`, `queue`, `leases`, and spawn UX.
+- Envelope compiler redacts secrets, attaches ROLE / ALLOWED / FORBIDDEN paths, and caps size. Tool paths outside the lease fail with `lease_path_denied`.
+- Supported spawn is MCP. `Task(subagent_type=chatgpt-web)` is an optional policy wrapper. `Task(model=chatgpt-web-high)` and the picker stay probe-only / experimental. Do not set Override OpenAI Base URL.
 
 ## Fail-closed
 
@@ -54,6 +67,10 @@ The parent compiles a focused envelope and calls MCP. GPT Web reasons. Cursor ke
 | 4 Native `Task(model=chatgpt-web-high)` | Probe only | `probe-subagent`; MCP remains supported if Cursor pins the child model |
 | 5 Installer / launcher | Shipped | `setup --browser-only` writes Cursor MCP; doctor is Cursor-first |
 | 6 Tool roundtrips | Shipped | GPT proposes `tool_calls`; Cursor executes; same `jobId` continues the Temporary Chat |
+| V2.1 Named leases + queue | Shipped | `metadata.role`, FIFO sixth turn, `lease_blocked` |
+| V2.2 Tool-loop hold | Shipped | `resumeRequired`, `blockedOnParent`, cancel releases queued/held jobs |
+| V2.3 Envelope compiler | Shipped | Secret redaction, path lease, 80k cap |
+| V2.4 Spawn UX | Shipped | MCP supported; wrapper supported; native Task probe-only; never BYOK override |
 
 ## Phase 0 probe
 
@@ -63,4 +80,4 @@ The parent compiles a focused envelope and calls MCP. GPT Web reasons. Cursor ke
 
 ## Phase 6 tool roundtrips
 
-GPT Web cannot run Cursor tools. If it needs Read/Grep/Shell/ApplyPatch, it returns `awaitingTools` with `tool_calls` JSON. The parent executes those tools, then calls `chatgpt_web_turn` again with the same `jobId` and `toolResults`. The managed Chrome Temporary Chat is held for that job (Codex turns still open a fresh page every time).
+GPT Web cannot run Cursor tools. If it needs Read/Grep/Shell/ApplyPatch, it returns `awaitingTools` with `tool_calls` JSON. The parent executes those tools, then calls `chatgpt_web_turn` again with the same `jobId` and `toolResults`. The managed Chrome Temporary Chat is held for that job (Codex turns still open a fresh page every time). If the parent does not resume, `status.blockedOnParent` surfaces the stall; cancel releases the tab.

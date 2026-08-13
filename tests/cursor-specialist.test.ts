@@ -127,14 +127,23 @@ describe("Cursor GPT Web specialist sessions", () => {
     expect(manager.status().pool.active).toBe(0);
   });
 
-  test("a sixth simultaneous task fails with chatgpt_web_tab_limit", async () => {
+  test("a sixth simultaneous task queues unless queue is false", async () => {
     const manager = new TaskSessionManager({
       capabilities: plus,
       runner: fakeRunner({ delayMs: 50 }),
     });
     const running = Promise.all(Array.from({ length: 5 }, (_, index) => manager.turn({ prompt: `job ${index}` })));
-    await Promise.resolve();
-    await expect(manager.turn({ prompt: "sixth" })).rejects.toBeInstanceOf(ChatGptWebTabLimitError);
+    for (let attempt = 0; attempt < 50 && manager.status().pool.active < 5; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 1));
+    }
+    expect(manager.status().pool.active).toBe(5);
+    const sixth = manager.turn({ prompt: "sixth" });
+    for (let attempt = 0; attempt < 50 && manager.status().queue.depth < 1; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 1));
+    }
+    expect(manager.status().queue.depth).toBe(1);
+    expect(manager.status().jobs.some(job => job.status === "queued")).toBe(true);
+    await expect(manager.turn({ prompt: "no-queue", queue: false })).rejects.toBeInstanceOf(ChatGptWebTabLimitError);
     await expect(manager.batch({
       tasks: [
         { id: "a", prompt: "a" },
@@ -146,7 +155,9 @@ describe("Cursor GPT Web specialist sessions", () => {
       ],
     })).rejects.toBeInstanceOf(ChatGptWebTabLimitError);
     await running;
+    await sixth;
     expect(manager.status().pool.active).toBe(0);
+    expect(manager.status().queue.depth).toBe(0);
   });
 
   test("cancel stops an in-flight job and releases the tab", async () => {

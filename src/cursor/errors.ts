@@ -42,6 +42,16 @@ export class ChatGptWebSessionLostError extends CursorChatGptWebError {
   }
 }
 
+export class ChatGptWebLeaseBlockedError extends CursorChatGptWebError {
+  constructor(role: string, jobId: string) {
+    super(
+      `GPT Web role ${JSON.stringify(role)} is already held by job ${jobId}`,
+      { status: 409, code: "lease_blocked" },
+    );
+    this.name = "ChatGptWebLeaseBlockedError";
+  }
+}
+
 export function isCursorChatGptWebError(error: unknown): error is CursorChatGptWebError {
   return error instanceof CursorChatGptWebError;
 }

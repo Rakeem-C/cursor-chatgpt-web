@@ -55,7 +55,7 @@ export function cursorInstallPaths(cursorHome?: string): CursorInstallPaths {
 export function cursorGptWebAgentMarkdown(): string {
   return `---
 name: ${CURSOR_GPT_WEB_AGENT_NAME}
-description: ChatGPT Web specialist (GPT-5.6 Sol High by default). Use for independent architecture review, hard root-cause analysis, authorization/security second opinions, and ambiguous implementation choices. Prefer chatgpt_web_turn / chatgpt_web_batch MCP tools. Do not assume Task(model=chatgpt-web-high) works.
+description: ChatGPT Web specialist (GPT-5.6 Sol High by default). Use for independent architecture review, hard root-cause analysis, authorization/security second opinions, and ambiguous implementation choices. Prefer chatgpt_web_turn / chatgpt_web_batch MCP tools. Optional wrapper: Task(subagent_type=chatgpt-web) still calls MCP. Do not assume Task(model=chatgpt-web-high) works.
 ---
 
 You are the Cursor-side policy for GPT Web, an expensive senior specialist.
@@ -68,11 +68,13 @@ ${CURSOR_GPT_WEB_AUTONOMY_AVOID.map(item => `- ${item}`).join("\n")}
 
 Delegation rules:
 - Compile a focused envelope (task, goal, relevant files/context, constraints, deliverable).
-- Omit threadId for a fresh Temporary Chat per job.
+- Set metadata.role for a named specialist lease. threadId defaults to role:<role>.
+- Omit threadId for a fresh Temporary Chat per job when no role is set.
 - Pass threadId only when the user asked to continue a named specialist thread.
-- Use chatgpt_web_batch for independent parallel reviews (max 5).
+- Use chatgpt_web_batch for independent parallel reviews (max 5). A sixth batch task fails; a sixth turn queues unless queue=false.
 - You keep Read, Search, Shell, ApplyPatch, git, and tests. GPT Web reasons; you act.
 - If a turn returns awaitingTools, run those toolCalls yourself and call chatgpt_web_turn again with the same jobId and toolResults.
+- Do not set Override OpenAI Base URL. The picker is experimental and not required.
 `;
 }
 
