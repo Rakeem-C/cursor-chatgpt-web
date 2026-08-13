@@ -27,12 +27,13 @@ These are the revised critical scenarios. Automated coverage lives under `tests/
 | HTTP images parsed | forwarded to the worker | protocol image test |
 | HTTP tools | forwarded as GPT Web proposals; not executed by this daemon | protocol tool_calls test; `ignoredToolCount` |
 | Installer writes MCP without clobbering | merge + uninstall | installer test |
+| Codex MCP installer writes TOML without openai_base_url | merge + uninstall | `tests/codex-mcp-installer.test.ts` |
 | Simulated High smoke | `test-gpt-web --simulate` | CLI test |
 
 Live proof still required on a real machine:
 
 1. Sign in to ChatGPT once through the launcher.
-2. `cursor-chatgpt-web setup --browser-only` now writes Cursor MCP; restart Cursor.
+2. `cursor-chatgpt-web setup --browser-only` now writes Cursor MCP and Codex MCP; restart Cursor and Codex.
 3. Parent (Grok / Claude / Composer) calls `chatgpt_web_turn` with mode `high`.
 4. A Temporary Chat opens with High selected.
 5. `probe --checklist` and `probe-subagent` against the installed Cursor build before calling the picker or native Task supported.

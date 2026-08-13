@@ -69,14 +69,14 @@ bun install --frozen-lockfile
 bun run src/cli.ts setup --browser-only --acknowledge-unofficial
 ```
 
-`setup --browser-only` writes `~/.cursor/mcp.json` unless you pass `--skip-cursor-install`. Then restart Cursor. The parent agent should see MCP tools:
+`setup --browser-only` writes `~/.cursor/mcp.json` unless you pass `--skip-cursor-install`, and writes the Codex MCP specialist unless you pass `--skip-codex-install`. Then restart Cursor and/or Codex. The parent agent should see MCP tools:
 
 - `chatgpt_web_turn`
 - `chatgpt_web_batch`
 - `chatgpt_web_status`
 - `chatgpt_web_cancel`
 
-The Cursor specialist server is `cursor-chatgpt-web cursor-mcp`. The original ChatGPT-side Codex connector remains `cursor-chatgpt-web mcp`.
+The Cursor specialist server is `cursor-chatgpt-web cursor-mcp`. Codex uses that same server via `install-codex` (`~/.codex/config.toml` `[mcp_servers.chatgpt-web]`). The original ChatGPT-side Codex connector remains `cursor-chatgpt-web mcp`. Do not set Override OpenAI Base URL / `openai_base_url` for this path. See [Codex GPT Web](docs/codex.md).
 
 Sign-in still uses the upstream launcher/browser flow. Being logged in at https://chatgpt.com/ in everyday Chrome is not enough: `setup` / `login` opens a dedicated Chrome window, copies allowlisted ChatGPT cookies into a private profile, then closes that window. Use passkeys or the same Google account in that window. Temporary Chat is a ChatGPT privacy mode, not anonymity. This project is unofficial.
 
@@ -101,7 +101,7 @@ Use GPT Web High when:
 
 Do not use GPT Web for trivial edits, formatting, simple searches, or one-line fixes.
 
-`install-cursor` writes that policy to `~/.cursor/agents/chatgpt-web.md`.
+`install-cursor` writes that policy to `~/.cursor/agents/chatgpt-web.md`. `install-codex` writes the Codex wrapper to `~/.codex/agents/chatgpt-web.toml` and `~/.codex/skills/gpt-web-use`.
 
 ## Experimental picker
 
@@ -121,6 +121,8 @@ cursor-chatgpt-web login
 cursor-chatgpt-web doctor
 cursor-chatgpt-web cursor-mcp
 cursor-chatgpt-web install-cursor
+cursor-chatgpt-web install-codex
+cursor-chatgpt-web uninstall-codex
 cursor-chatgpt-web cursor-status
 cursor-chatgpt-web test-gpt-web --simulate
 cursor-chatgpt-web cursor-serve
@@ -139,6 +141,7 @@ bun run verify
 ```
 
 - [Cursor architecture](docs/cursor.md)
+- [Codex GPT Web](docs/codex.md)
 - [Acceptance tests](docs/acceptance.md)
 - [Upstream Codex architecture](docs/architecture.md)
 - [Security model](docs/security-model.md)

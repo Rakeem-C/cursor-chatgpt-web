@@ -19,6 +19,7 @@ import { runChatGptMcpMain } from "./adapters/chatgpt-web/mcp-main";
 import { runCursorChatGptWebMcpServer } from "./cursor/mcp";
 import { installCursorIntegration, uninstallCursorIntegration } from "./cursor/installer";
 import { inspectCursorIntegration } from "./cursor/inspect";
+import { installCodexMcpIntegration, uninstallCodexMcpIntegration } from "./codex/mcp-installer";
 import { detectChatGptWebCapabilities } from "./cursor/capabilities";
 import { startCursorProtocolServer } from "./cursor/protocol";
 import { getCursorSpecialistRuntime, resetCursorSpecialistRuntime } from "./cursor/runtime";
@@ -41,6 +42,8 @@ Usage:
   cursor-chatgpt-web cursor-mcp
   cursor-chatgpt-web install-cursor [--cursor-home PATH] [--dry-run]
   cursor-chatgpt-web uninstall-cursor [--cursor-home PATH]
+  cursor-chatgpt-web install-codex [--codex-home PATH] [--dry-run]
+  cursor-chatgpt-web uninstall-codex [--codex-home PATH]
   cursor-chatgpt-web cursor-status [--cursor-home PATH]
   cursor-chatgpt-web test-gpt-web [--simulate] [--live] [--prompt TEXT]
   cursor-chatgpt-web cursor-serve [--port NUMBER]
@@ -61,6 +64,8 @@ Cursor specialist:
   cursor-mcp                   Stdio MCP server: chatgpt_web_turn, chatgpt_web_batch, chatgpt_web_status, chatgpt_web_cancel
   install-cursor               Write ~/.cursor/mcp.json, agents/chatgpt-web.md, and rules/chatgpt-web.mdc
   uninstall-cursor             Remove the Cursor MCP specialist without touching ChatGPT login
+  install-codex                Write ~/.codex/config.toml MCP, agents/chatgpt-web.toml, and gpt-web-use skill
+  uninstall-codex              Remove the Codex MCP specialist without touching ChatGPT login or openai_base_url
   cursor-status                Show Cursor MCP install, account modes, and live specialist slots 0/5
   test-gpt-web                 Run one High specialist turn (default --simulate; --live uses ChatGPT)
   cursor-serve                 Experimental OpenAI-compatible picker bridge (127.0.0.1)
@@ -86,7 +91,9 @@ Setup options:
   --auto-approve-tool-calls    Opt in to per-call browser clicks on "Allow once" prompts
   --acknowledge-unofficial     Accept the one-time unofficial-browser-automation notice
   --skip-cursor-install        Do not write ~/.cursor/mcp.json during setup
+  --skip-codex-install         Do not write ~/.codex MCP specialist during setup
   --cursor-home PATH           Cursor config directory for install-cursor / setup
+  --codex-home PATH            Codex config directory for install-codex / setup
 
 Global:
   --home PATH                  Override ~/.cursor-chatgpt-web
@@ -218,7 +225,9 @@ async function setupCommand(args: string[]): Promise<void> {
   options.replaceCodexRoute = takeFlag(args, "--replace-codex-route");
   options.restartService = takeFlag(args, "--restart-service");
   const skipCursorInstall = takeFlag(args, "--skip-cursor-install");
+  const skipCodexInstall = takeFlag(args, "--skip-codex-install");
   const cursorHome = takeOption(args, "--cursor-home");
+  const codexHome = takeOption(args, "--codex-home");
   assertNoArgs(args);
 
   if (!acknowledged) {
@@ -261,6 +270,13 @@ async function setupCommand(args: string[]): Promise<void> {
     const installed = installCursorIntegration(cursorHome ? { cursorHome } : {});
     stdout.write(`Installed Cursor MCP specialist: ${installed.mcpPath}\n`);
     stdout.write("Restart Cursor so it loads chatgpt_web_turn / chatgpt_web_batch.\n");
+  }
+  if (skipCodexInstall) {
+    stdout.write("Skipped Codex MCP install. Run: cursor-chatgpt-web install-codex\n");
+  } else {
+    const installed = installCodexMcpIntegration(codexHome ? { codexHome } : {});
+    stdout.write(`Installed Codex MCP specialist: ${installed.configPath}\n`);
+    stdout.write("Restart Codex so it loads chatgpt_web_turn / chatgpt_web_batch.\n");
   }
 }
 
@@ -433,6 +449,30 @@ async function uninstallCursorCommand(args: string[]): Promise<void> {
   stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
+async function installCodexCommand(args: string[]): Promise<void> {
+  const codexHome = takeOption(args, "--codex-home");
+  const dryRun = takeFlag(args, "--dry-run");
+  assertNoArgs(args);
+  const result = installCodexMcpIntegration({
+    ...(codexHome ? { codexHome } : {}),
+    dryRun,
+  });
+  stdout.write(`${JSON.stringify({
+    dryRun,
+    configPath: result.configPath,
+    agentPath: result.agentPath,
+    skillPath: result.skillPath,
+    mcpCommand: result.mcpCommand,
+  }, null, 2)}\n`);
+}
+
+async function uninstallCodexCommand(args: string[]): Promise<void> {
+  const codexHome = takeOption(args, "--codex-home");
+  assertNoArgs(args);
+  const result = uninstallCodexMcpIntegration(codexHome ? { codexHome } : {});
+  stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+}
+
 async function cursorServeCommand(args: string[]): Promise<void> {
   const portRaw = takeOption(args, "--port");
   assertNoArgs(args);
@@ -476,6 +516,7 @@ async function uninstallCommand(args: string[]): Promise<void> {
   }
   if (config && process.platform === "darwin" && !launcherRuntimeStopped) await uninstallService(config);
   uninstallCodexIntegration();
+  uninstallCodexMcpIntegration();
   if (!keepData) rmSync(getConfigDir(), { recursive: true, force: true });
   stdout.write(keepData ? "Uninstalled; private application data was preserved.\n" : "Uninstalled and removed private application data.\n");
 }
@@ -521,6 +562,8 @@ async function main(): Promise<void> {
   else if (command === "cursor-mcp") await runCursorChatGptWebMcpServer();
   else if (command === "install-cursor") await installCursorCommand(args);
   else if (command === "uninstall-cursor") await uninstallCursorCommand(args);
+  else if (command === "install-codex") await installCodexCommand(args);
+  else if (command === "uninstall-codex") await uninstallCodexCommand(args);
   else if (command === "cursor-status") await cursorStatusCommand(args);
   else if (command === "test-gpt-web") await testGptWebCommand(args);
   else if (command === "cursor-serve") await cursorServeCommand(args);

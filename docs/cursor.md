@@ -80,4 +80,6 @@ Named role leases, a FIFO queue when all five tabs are busy, and a tool loop the
 
 ## Phase 6 tool roundtrips
 
-GPT Web cannot run Cursor tools. If it needs Read/Grep/Shell/ApplyPatch, it returns `awaitingTools` with `tool_calls` JSON. The parent executes those tools, then calls `chatgpt_web_turn` again with the same `jobId` and `toolResults`. The managed Chrome Temporary Chat is held for that job (Codex turns still open a fresh page every time). If the parent does not resume, `status.blockedOnParent` surfaces the stall; cancel releases the tab.
+GPT Web cannot run Cursor tools. If it needs Read/Grep/Shell/ApplyPatch, it returns `awaitingTools` with `tool_calls` JSON. The parent executes those tools, then calls `chatgpt_web_turn` again with the same `jobId` and `toolResults`. The managed Chrome Temporary Chat is held for that job.
+
+Codex uses this same MCP server. See [Codex GPT Web](codex.md). Do not set `openai_base_url` for that path. If the parent does not resume, `status.blockedOnParent` surfaces the stall; cancel releases the tab.

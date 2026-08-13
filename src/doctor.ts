@@ -3,6 +3,7 @@ import type { AppConfig } from "./config";
 import { getConfigDir, getConfigPath, loadConfig } from "./config";
 import { join } from "node:path";
 import { inspectCodexIntegration } from "./codex-integration";
+import { inspectCodexMcpIntegration } from "./codex/inspect";
 import { detectChatGptWebCapabilities } from "./cursor/capabilities";
 import { inspectCursorIntegration } from "./cursor/inspect";
 import { browserLoginStateExists, loginVerificationMarkerPath } from "./browser-login";
@@ -150,17 +151,27 @@ export async function runDoctor(): Promise<DoctorReport> {
         detail: cursor.errors.join("; ") || undefined,
       });
 
+  const codexMcp = inspectCodexMcpIntegration();
+  checks.push(codexMcp.installed
+    ? { id: "codex-mcp", status: "ok", message: `Codex MCP specialist is installed (${codexMcp.configPath})` }
+    : {
+        id: "codex-mcp",
+        status: "warning",
+        message: "Codex MCP specialist is not installed; run `cursor-chatgpt-web install-codex`",
+        detail: codexMcp.errors.join("; ") || undefined,
+      });
+
   const codex = inspectCodexIntegration();
   if (!codex.installed) {
     checks.push({
       id: "codex",
       status: "warning",
-      message: "Codex model route is not installed (optional for the Cursor MCP specialist)",
+      message: "Codex BYOK openai_base_url route is not installed (optional; MCP specialist is the supported Codex path)",
     });
   } else if (codex.errors.length > 0) {
-    checks.push({ id: "codex", status: "error", message: "Codex integration is inconsistent", detail: codex.errors.join("; ") });
+    checks.push({ id: "codex", status: "error", message: "Codex BYOK route is inconsistent", detail: codex.errors.join("; ") });
   } else {
-    checks.push({ id: "codex", status: "ok", message: "Codex native model route is installed" });
+    checks.push({ id: "codex", status: "ok", message: "Codex BYOK Responses route is installed" });
   }
   const requireCodexRuntime = codex.installed;
 

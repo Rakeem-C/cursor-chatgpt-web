@@ -243,7 +243,7 @@ test("doctor treats a missing Codex route as a warning for Cursor MCP", async ()
     browserHost: "managed-chrome",
     chromeExecutablePath: process.execPath,
     storageStatePath: join(appHome, "browser", "storage-state.json"),
-    brokerSocketPath: join(appHome, "runtime", "turn-broker.sock"),
+    brokerSocketPath: defaultBrokerEndpoint(appHome),
     headed: true,
     proAvailable: false,
     autoApproveToolCalls: false,
@@ -261,7 +261,9 @@ test("doctor treats a missing Codex route as a warning for Cursor MCP", async ()
       checks: Array<{ id: string; status: string; message: string }>;
     };
     expect(report.checks.find(check => check.id === "codex")?.status).toBe("warning");
-    expect(report.checks.find(check => check.id === "codex")?.message).toContain("optional for the Cursor MCP specialist");
+    expect(report.checks.find(check => check.id === "codex")?.message).toContain("optional; MCP specialist is the supported Codex path");
+    expect(report.checks.find(check => check.id === "codex-mcp")?.status).toBe("warning");
+    expect(report.checks.find(check => check.id === "codex-mcp")?.message).toContain("install-codex");
     expect(report.checks.find(check => check.id === "proxy")?.status).toBe("warning");
     expect(report.checks.find(check => check.id === "picker")?.status).toBe("warning");
     expect(report.checks.find(check => check.id === "native-task")?.status).toBe("warning");

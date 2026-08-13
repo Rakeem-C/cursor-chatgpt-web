@@ -26,13 +26,13 @@ test("setup accepts only a matching daemon that is ready for new Codex turns", (
   expect(setupProxyIsReady({ ...ready, version: "0.1.16" }, config)).toBe(false);
 });
 
-test("Windows browser-only Cursor setup skips macOS launchd and the Codex proxy", () => {
+test("browser-only setup skips the Codex BYOK openai_base_url proxy on every OS", () => {
   expect(terminalManagedServiceSupported("darwin")).toBe(true);
   expect(terminalManagedServiceSupported("win32")).toBe(false);
   expect(terminalManagedServiceSupported("linux")).toBe(false);
   expect(cursorBrowserOnlySkipsCodexRuntime({ mode: "browser-only" }, "win32")).toBe(true);
   expect(cursorBrowserOnlySkipsCodexRuntime({ mode: "browser-only" }, "linux")).toBe(true);
-  expect(cursorBrowserOnlySkipsCodexRuntime({ mode: "browser-only" }, "darwin")).toBe(false);
+  expect(cursorBrowserOnlySkipsCodexRuntime({ mode: "browser-only" }, "darwin")).toBe(true);
   expect(cursorBrowserOnlySkipsCodexRuntime({ mode: "full" }, "win32")).toBe(false);
 });
 

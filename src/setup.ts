@@ -88,9 +88,9 @@ export function terminalManagedServiceSupported(platform = process.platform): bo
 
 export function cursorBrowserOnlySkipsCodexRuntime(
   options: Pick<SetupOptions, "mode">,
-  platform = process.platform,
+  _platform = process.platform,
 ): boolean {
-  return options.mode === "browser-only" && !terminalManagedServiceSupported(platform);
+  return options.mode === "browser-only";
 }
 
 function loadExistingConfig(): AppConfig | undefined {

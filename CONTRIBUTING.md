@@ -1,6 +1,6 @@
 # Contributing
 
-Keep the project narrow: ChatGPT Web as a Cursor specialist, plus the upstream Codex bridge.
+Keep the project narrow: ChatGPT Web as a Cursor specialist, plus Codex MCP against the same `cursor-mcp` daemon. The upstream Codex Responses / BYOK bridge is optional leftover, not the required path.
 
 Cursor V1 invariants:
 
@@ -9,6 +9,12 @@ Cursor V1 invariants:
 - Independent jobs get isolated Temporary Chats. Persistence requires an explicit `threadId`.
 - At most five live browser sessions. A sixth fails with `chatgpt_web_tab_limit`.
 - Cursor owns filesystem, shell, edits, and tests in V1.
+
+Codex MCP invariants:
+
+- Codex calls `chatgpt_web_turn` / `chatgpt_web_batch` on the same `cursor-mcp` server. A custom agent is only a policy wrapper.
+- `install-codex` must not write `openai_base_url`.
+- Browser-only setup must not install the BYOK Codex route.
 
 Upstream Codex invariants:
 
