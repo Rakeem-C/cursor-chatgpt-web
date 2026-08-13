@@ -336,7 +336,7 @@ export async function loginToChatGpt(
   // normal loopback port so provider/passkey sign-in stays on Chrome's ordinary browser surface.
   const devToolsPort = await reserveLoopbackPort();
   process.stdout.write(
-    "A dedicated system Chrome/Chromium window is open. Sign in to ChatGPT and leave it open; transfer continues automatically when the Temporary Chat composer is visible.\n",
+    "A dedicated system Chrome/Chromium window is open. An already-open chatgpt.com tab in your everyday Chrome is not reused; sign in in this window (passkeys work) and leave it open. Capture continues when the Temporary Chat composer is visible.\n",
   );
   const loginBrowser = spawn(config.chromeExecutablePath, [
     `--user-data-dir=${profileDir}`,

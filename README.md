@@ -78,7 +78,7 @@ bun run src/cli.ts setup --browser-only --acknowledge-unofficial
 
 The Cursor specialist server is `cursor-chatgpt-web cursor-mcp`. The original ChatGPT-side Codex connector remains `cursor-chatgpt-web mcp`.
 
-Sign-in still uses the upstream launcher/browser flow: system Chrome for passkeys, then a private embedded profile. Temporary Chat is a ChatGPT privacy mode, not anonymity. This project is unofficial.
+Sign-in still uses the upstream launcher/browser flow. Being logged in at https://chatgpt.com/ in everyday Chrome is not enough: `setup` / `login` opens a dedicated Chrome window, copies allowlisted ChatGPT cookies into a private profile, then closes that window. Use passkeys or the same Google account in that window. Temporary Chat is a ChatGPT privacy mode, not anonymity. This project is unofficial.
 
 ### Simulated MCP (no ChatGPT login)
 

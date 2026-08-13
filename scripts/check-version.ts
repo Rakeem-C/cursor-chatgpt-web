@@ -34,6 +34,8 @@ const expected = [
 for (const [path, needle] of expected) {
   const fullPath = resolve(root, path);
   if (!existsSync(fullPath)) {
+    // Named-repo GitHub OAuth tokens often lack `workflow` scope, so CI files
+    // may be absent from the published tree. Validate them when present.
     if (path.startsWith(".github/workflows/")) continue;
     throw new Error(`${path} is not synchronized to ${packageVersion}`);
   }

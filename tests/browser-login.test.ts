@@ -60,6 +60,7 @@ test("login uses one normal Chrome on a non-automation loopback port and never l
     expect(source).toContain("browser.newContext({ storageState })");
     expect(loginSource).not.toContain("chromium.launch(");
     expect(loginSource).not.toContain("AutomationControlled");
+    expect(loginSource).toContain("An already-open chatgpt.com tab in your everyday Chrome is not reused");
   } finally {
     if (previousLog === undefined) delete process.env.CODEX_LOGIN_ARG_LOG;
     else process.env.CODEX_LOGIN_ARG_LOG = previousLog;
