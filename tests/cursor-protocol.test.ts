@@ -34,6 +34,7 @@ describe("experimental Cursor HTTP adapter", () => {
     }, new AbortController().signal);
     expect(withImage.images?.[0]?.imageUrl).toContain("data:image/png");
     expect(withImage.ignoredToolCount).toBe(1);
+    expect(withImage.tools?.[0]?.name).toBe("Read");
     expect(withImage.model).toBe("chatgpt-web-high");
 
     const responses = parseCursorHttpBody({
@@ -91,5 +92,46 @@ describe("experimental Cursor HTTP adapter", () => {
     const body = await response.text();
     expect(body).toContain("simulated high gpt-5.6-sol");
     expect(body).toContain("data: [DONE]");
+  });
+
+  test("simulated tool roundtrips return OpenAI tool_calls and continue the same job", async () => {
+    process.env.CURSOR_CHATGPT_WEB_SIMULATE = "1";
+    resetCursorSpecialistRuntime();
+    const first = await handleCursorProtocolRequest(new Request("http://127.0.0.1/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "chatgpt-web-high",
+        messages: [{ role: "user", content: "SIMULATE_TOOL_CALL Review lifecycle.ts" }],
+        tools: [{ type: "function", function: { name: "Read" } }],
+      }),
+    }));
+    expect(first.status).toBe(200);
+    const payload = await first.json() as {
+      id: string;
+      choices: Array<{ finish_reason: string; message: { tool_calls: Array<{ function: { name: string } }> } }>;
+    };
+    expect(payload.choices[0]?.finish_reason).toBe("tool_calls");
+    expect(payload.choices[0]?.message.tool_calls[0]?.function.name).toBe("Read");
+    const jobId = payload.id.replace(/^chatcmpl-/, "");
+
+    const second = await handleCursorProtocolRequest(new Request("http://127.0.0.1/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "chatgpt-web-high",
+        previous_response_id: jobId,
+        messages: [
+          { role: "user", content: "SIMULATE_TOOL_CALL Review lifecycle.ts" },
+          { role: "tool", tool_call_id: "call_1", content: "export const NEW = 1" },
+        ],
+      }),
+    }));
+    expect(second.status).toBe(200);
+    const follow = await second.json() as {
+      choices: Array<{ finish_reason: string; message: { content: string } }>;
+    };
+    expect(follow.choices[0]?.finish_reason).toBe("stop");
+    expect(follow.choices[0]?.message.content).toContain("Tool evidence received");
   });
 });

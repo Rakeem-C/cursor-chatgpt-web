@@ -32,6 +32,26 @@ export class UnknownCursorModelError extends CursorChatGptWebError {
   }
 }
 
+export class ChatGptWebSessionLostError extends CursorChatGptWebError {
+  constructor(jobId: string) {
+    super(
+      `ChatGPT Temporary Chat for job ${jobId} was lost; retry as a new job`,
+      { status: 410, code: "chatgpt_web_session_lost", retryable: true },
+    );
+    this.name = "ChatGptWebSessionLostError";
+  }
+}
+
+export class ChatGptWebLeaseBlockedError extends CursorChatGptWebError {
+  constructor(role: string, jobId: string) {
+    super(
+      `GPT Web role ${JSON.stringify(role)} is already held by job ${jobId}`,
+      { status: 409, code: "lease_blocked" },
+    );
+    this.name = "ChatGptWebLeaseBlockedError";
+  }
+}
+
 export function isCursorChatGptWebError(error: unknown): error is CursorChatGptWebError {
   return error instanceof CursorChatGptWebError;
 }

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { availableCursorChatGptWebRoutes, parseCursorChatGptWebMode } from "../chatgpt-web-models";
 import { CursorChatGptWebError, isCursorChatGptWebError, UnknownCursorModelError } from "./errors";
 import { getCursorSpecialistRuntime } from "./runtime";
-import type { SpecialistImage, SpecialistTurnResult } from "./task-session";
+import type { SpecialistImage, SpecialistToolCall, SpecialistToolResult, SpecialistToolSpec, SpecialistTurnResult } from "./task-session";
 
 export interface CursorTurn {
   model: string;
@@ -13,6 +13,8 @@ export interface CursorTurn {
   stream: boolean;
   abortSignal: AbortSignal;
   ignoredToolCount: number;
+  tools?: SpecialistToolSpec[];
+  toolResults?: SpecialistToolResult[];
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -52,6 +54,62 @@ function imageFromPart(part: unknown): SpecialistImage | undefined {
       ? nested.detail
       : undefined;
   return { imageUrl, ...(detail ? { detail } : {}) };
+}
+
+function collectTools(body: Record<string, unknown>): SpecialistToolSpec[] {
+  if (!Array.isArray(body.tools)) return [];
+  return body.tools.flatMap(item => {
+    const rec = record(item);
+    const fn = record(rec?.function);
+    const name = typeof rec?.name === "string"
+      ? rec.name
+      : typeof fn?.name === "string"
+        ? fn.name
+        : undefined;
+    if (!name?.trim()) return [];
+    const description = typeof rec?.description === "string"
+      ? rec.description
+      : typeof fn?.description === "string"
+        ? fn.description
+        : undefined;
+    const parameters = record(rec?.parameters) ?? record(fn?.parameters);
+    return [{
+      name: name.trim(),
+      ...(description ? { description } : {}),
+      ...(parameters ? { parameters } : {}),
+    }];
+  });
+}
+
+function collectToolResults(body: Record<string, unknown>): SpecialistToolResult[] {
+  const messages = Array.isArray(body.messages) ? body.messages : Array.isArray(body.input) ? body.input : [];
+  const results: SpecialistToolResult[] = [];
+  for (const message of messages) {
+    const item = record(message);
+    if (!item) continue;
+    if (item.role !== "tool" && item.type !== "function_call_output") continue;
+    const content = textFromContent(item.content)
+      || (typeof item.output === "string" ? item.output : "")
+      || (typeof item.content === "string" ? item.content : "");
+    results.push({
+      ...(typeof item.tool_call_id === "string" ? { id: item.tool_call_id } : typeof item.call_id === "string" ? { id: item.call_id } : {}),
+      ...(typeof item.name === "string" ? { name: item.name } : {}),
+      content,
+    });
+  }
+  return results;
+}
+
+function lastUserText(body: Record<string, unknown>): string {
+  const messages = Array.isArray(body.messages) ? body.messages : Array.isArray(body.input) ? body.input : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const item = record(messages[index]);
+    if (!item) continue;
+    if (item.role === "user" || item.type === "message" && item.role === "user") {
+      return textFromContent(item.content).trim();
+    }
+  }
+  return "";
 }
 
 function collectImages(body: Record<string, unknown>): SpecialistImage[] {
@@ -102,18 +160,25 @@ export function parseCursorHttpBody(body: unknown, abortSignal: AbortSignal): Cu
   const model = typeof parsed.model === "string" ? parsed.model.trim() : "";
   if (!parseCursorChatGptWebMode(model)) throw new UnknownCursorModelError(model || "(missing)");
   const input = collectMessages(parsed).trim();
-  if (!input) throw new CursorChatGptWebError("Request has no prompt or messages", { status: 400, code: "empty_input" });
   const previousResponseId = typeof parsed.previous_response_id === "string" ? parsed.previous_response_id : undefined;
   const images = collectImages(parsed);
-  const ignoredToolCount = Array.isArray(parsed.tools) ? parsed.tools.length : 0;
+  const tools = collectTools(parsed);
+  const toolResults = collectToolResults(parsed);
+  const ignoredToolCount = tools.length;
+  const continuationInput = toolResults.length > 0 ? lastUserText(parsed) : input;
+  if (!continuationInput && toolResults.length === 0) {
+    throw new CursorChatGptWebError("Request has no prompt or messages", { status: 400, code: "empty_input" });
+  }
   return {
     model,
-    input,
+    input: continuationInput || input,
     ...(images.length > 0 ? { images } : {}),
     ...(previousResponseId ? { previousResponseId } : {}),
     stream: parsed.stream === true,
     abortSignal,
     ignoredToolCount,
+    ...(tools.length > 0 ? { tools } : {}),
+    ...(toolResults.length > 0 ? { toolResults } : {}),
   };
 }
 
@@ -156,17 +221,52 @@ function captureRequest(url: URL, body: unknown): void {
   }, null, 2)}\n`);
 }
 
+function jobIdFromResponseId(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  return trimmed.replace(/^chatcmpl-/, "");
+}
+
 async function runTurn(
   turn: CursorTurn,
   onTextDelta?: (text: string) => void,
 ): Promise<SpecialistTurnResult> {
-  return await getCursorSpecialistRuntime().turn({
+  const runtime = getCursorSpecialistRuntime();
+  const jobs = runtime.status().jobs;
+  const previousId = jobIdFromResponseId(turn.previousResponseId);
+  const awaiting = previousId
+    ? jobs.find(job => job.jobId === previousId && job.status === "awaiting_tools")
+    : turn.toolResults?.length
+      ? jobs.filter(job => job.status === "awaiting_tools")
+      : [];
+  const continuationJob = Array.isArray(awaiting)
+    ? awaiting.length === 1 ? awaiting[0] : undefined
+    : awaiting;
+
+  return await runtime.turn({
     prompt: turn.input,
     mode: turn.model,
-    ...(turn.previousResponseId ? { threadId: turn.previousResponseId } : {}),
+    ...(continuationJob
+      ? { jobId: continuationJob.jobId }
+      : previousId
+        ? { threadId: previousId }
+        : {}),
     ...(turn.images ? { images: turn.images } : {}),
+    ...(turn.tools ? { tools: turn.tools } : {}),
+    ...(turn.toolResults ? { toolResults: turn.toolResults } : {}),
     ...(onTextDelta ? { onTextDelta } : {}),
   });
+}
+
+function openaiToolCalls(calls: SpecialistToolCall[]) {
+  return calls.map(call => ({
+    id: call.id,
+    type: "function" as const,
+    function: {
+      name: call.name,
+      arguments: JSON.stringify(call.arguments),
+    },
+  }));
 }
 
 function completionId(result: SpecialistTurnResult): string {
@@ -196,7 +296,13 @@ function streamChatCompletions(turn: CursorTurn): Response {
         send({
           id,
           object: "chat.completion.chunk",
-          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          choices: [{
+            index: 0,
+            delta: result.awaitingTools
+              ? { tool_calls: openaiToolCalls(result.toolCalls) }
+              : {},
+            finish_reason: result.awaitingTools ? "tool_calls" : "stop",
+          }],
         });
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
@@ -244,23 +350,32 @@ export async function handleCursorProtocolRequest(req: Request): Promise<Respons
     if (url.pathname.endsWith("/responses")) {
       const result = await runTurn(turn);
       return jsonResponse(200, {
-        id: completionId(result),
+        id: result.jobId,
         object: "response",
         model: result.modelId,
-        status: "completed",
-        output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: result.answer }] }],
+        status: result.awaitingTools ? "incomplete" : "completed",
+        output: result.awaitingTools
+          ? result.toolCalls.map(call => ({
+              type: "function_call",
+              call_id: call.id,
+              name: call.name,
+              arguments: JSON.stringify(call.arguments),
+            }))
+          : [{ type: "message", role: "assistant", content: [{ type: "output_text", text: result.answer }] }],
       });
     }
     if (turn.stream) return streamChatCompletions(turn);
     const result = await runTurn(turn);
     return jsonResponse(200, {
-      id: `chatcmpl-${completionId(result)}`,
+      id: `chatcmpl-${result.jobId}`,
       object: "chat.completion",
       model: result.modelId,
       choices: [{
         index: 0,
-        message: { role: "assistant", content: result.answer },
-        finish_reason: "stop",
+        message: result.awaitingTools
+          ? { role: "assistant", content: result.answer || null, tool_calls: openaiToolCalls(result.toolCalls) }
+          : { role: "assistant", content: result.answer },
+        finish_reason: result.awaitingTools ? "tool_calls" : "stop",
       }],
     });
   } catch (error) {

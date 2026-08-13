@@ -5,8 +5,8 @@ import { timingSafeEqual } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { stdin, stdout } from "node:process";
-import { checkBrowserEngine, loginToChatGpt } from "./browser-login";
-import { CHATGPT_CONNECTOR_NAME, defaultConfig, getConfigDir, getConfigPath, loadConfig, loadConfigForSetup } from "./config";
+import { applyCapturedLoginCapabilities, checkBrowserEngine, loginToChatGpt } from "./browser-login";
+import { CHATGPT_CONNECTOR_NAME, defaultConfig, getConfigDir, getConfigPath, loadConfig, loadConfigForSetup, saveConfig } from "./config";
 import { inspectLauncherBrowserHost, readLauncherBrowserHostDescriptor } from "./launcher-browser-host";
 import {
   activateCodexIntegration,
@@ -45,6 +45,7 @@ Usage:
   cursor-chatgpt-web test-gpt-web [--simulate] [--live] [--prompt TEXT]
   cursor-chatgpt-web cursor-serve [--port NUMBER]
   cursor-chatgpt-web probe [--port NUMBER] [--checklist]
+  cursor-chatgpt-web probe-subagent
   cursor-chatgpt-web mcp [--broker-socket PATH]
   cursor-chatgpt-web mcp-codex [--broker-socket PATH]
   cursor-chatgpt-web setup --full --tunnel-id ID --runtime-key-file PATH [options]
@@ -64,6 +65,7 @@ Cursor specialist:
   test-gpt-web                 Run one High specialist turn (default --simulate; --live uses ChatGPT)
   cursor-serve                 Experimental OpenAI-compatible picker bridge (127.0.0.1)
   probe                        Capture real Cursor BYOK requests; --checklist prints the Phase 0 matrix
+  probe-subagent               Print the Grok/Composer Task(model=chatgpt-web-high) probe template
   mcp / mcp-codex              Original ChatGPT-side Codex Native connector (full harness)
 
 Setup options:
@@ -83,6 +85,8 @@ Setup options:
   --login                      Refresh the stored ChatGPT login even if one exists
   --auto-approve-tool-calls    Opt in to per-call browser clicks on "Allow once" prompts
   --acknowledge-unofficial     Accept the one-time unofficial-browser-automation notice
+  --skip-cursor-install        Do not write ~/.cursor/mcp.json during setup
+  --cursor-home PATH           Cursor config directory for install-cursor / setup
 
 Global:
   --home PATH                  Override ~/.cursor-chatgpt-web
@@ -164,7 +168,9 @@ async function loginCommand(args: string[]): Promise<void> {
       throw new Error("ChatGPT login is owned by the launcher; open Codex Web GPT and use its Sign in step");
     }
     const result = await loginToChatGpt(config);
+    saveConfig(applyCapturedLoginCapabilities(config, result));
     stdout.write(`ChatGPT login stored at ${result.storageStatePath}\n`);
+    stdout.write(`Account capabilities: sol=${result.solAvailable} pro=${result.proAvailable}\n`);
     return;
   }
 
@@ -211,6 +217,8 @@ async function setupCommand(args: string[]): Promise<void> {
   options.autoApproveToolCalls = takeFlag(args, "--auto-approve-tool-calls");
   options.replaceCodexRoute = takeFlag(args, "--replace-codex-route");
   options.restartService = takeFlag(args, "--restart-service");
+  const skipCursorInstall = takeFlag(args, "--skip-cursor-install");
+  const cursorHome = takeOption(args, "--cursor-home");
   assertNoArgs(args);
 
   if (!acknowledged) {
@@ -247,8 +255,13 @@ async function setupCommand(args: string[]): Promise<void> {
     stdout.write("One account-level step remains: attach the tunnel to the ChatGPT connector named in config.\n");
     stdout.write("Open: https://chatgpt.com/#settings/Plugins\n");
   }
-  stdout.write("For Cursor, run: cursor-chatgpt-web install-cursor\n");
-  stdout.write("Then restart Cursor so it loads the GPT Web MCP specialist.\n");
+  if (skipCursorInstall) {
+    stdout.write("Skipped Cursor MCP install. Run: cursor-chatgpt-web install-cursor\n");
+  } else {
+    const installed = installCursorIntegration(cursorHome ? { cursorHome } : {});
+    stdout.write(`Installed Cursor MCP specialist: ${installed.mcpPath}\n`);
+    stdout.write("Restart Cursor so it loads chatgpt_web_turn / chatgpt_web_batch.\n");
+  }
 }
 
 async function doctorCommand(args: string[]): Promise<void> {
@@ -428,6 +441,12 @@ async function cursorServeCommand(args: string[]): Promise<void> {
     port: portRaw ? Number(portRaw) : 17842,
   });
   stdout.write(`cursor-chatgpt-web ${VERSION} experimental picker bridge on http://127.0.0.1:${server.port}/v1\n`);
+  const { reviewCapturedFixtures } = await import("./cursor/fixtures/review");
+  const review = reviewCapturedFixtures();
+  stdout.write(`pickerMode=${review.pickerMode}; nativeTaskMode=${review.nativeTaskMode}\n`);
+  if (review.pickerMode !== "supported") {
+    stdout.write("Picker stays experimental until probe fixtures prove Cursor sent chatgpt-web-* traffic.\n");
+  }
   await new Promise<void>(() => {});
 }
 
@@ -516,6 +535,11 @@ async function main(): Promise<void> {
     }
     startCursorProbeServer(portRaw ? { port: Number(portRaw) } : {});
     await new Promise<void>(() => {});
+  }
+  else if (command === "probe-subagent") {
+    assertNoArgs(args);
+    const { printCursorSubagentProbeReport } = await import("./cursor/subagent-probe");
+    stdout.write(printCursorSubagentProbeReport());
   }
   else if (command === "service") await serviceCommand(args);
   else if (command === "tunnel") await tunnelCommand(args);

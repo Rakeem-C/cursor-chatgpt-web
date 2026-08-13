@@ -55,7 +55,7 @@ The selected model ID is authoritative. Cursor Fast/Effort must never silently c
 ## Session rules
 
 - No `threadId` → one job, one Temporary Chat, then the browser slot is released.
-- Same in-flight job (cancel, later tool roundtrips) → same Temporary Chat.
+- Same in-flight job (cancel, later tool roundtrips) → same Temporary Chat. If GPT Web returns `awaitingTools`, Cursor executes the `toolCalls` and continues with the same `jobId`.
 - Explicit `threadId` → persist specialist history across later MCP calls. The physical tab is still recycled; history is replayed into a new Temporary Chat.
 - Max **5** live browser sessions. A sixth concurrent job fails with `chatgpt_web_tab_limit` (HTTP 429).
 - Cursor owns project memory. GPT Web only sees the compiled envelope for that job.
@@ -67,10 +67,9 @@ git clone https://github.com/Rakeem-C/cursor-chatgpt-web.git cursor-chatgpt-web
 cd cursor-chatgpt-web
 bun install --frozen-lockfile
 bun run src/cli.ts setup --browser-only --acknowledge-unofficial
-bun run src/cli.ts install-cursor
 ```
 
-Then restart Cursor. The parent agent should see MCP tools:
+`setup --browser-only` writes `~/.cursor/mcp.json` unless you pass `--skip-cursor-install`. Then restart Cursor. The parent agent should see MCP tools:
 
 - `chatgpt_web_turn`
 - `chatgpt_web_batch`
@@ -79,7 +78,7 @@ Then restart Cursor. The parent agent should see MCP tools:
 
 The Cursor specialist server is `cursor-chatgpt-web cursor-mcp`. The original ChatGPT-side Codex connector remains `cursor-chatgpt-web mcp`.
 
-Sign-in still uses the upstream launcher/browser flow: system Chrome for passkeys, then a private embedded profile. Temporary Chat is a ChatGPT privacy mode, not anonymity. This project is unofficial.
+Sign-in still uses the upstream launcher/browser flow. Being logged in at https://chatgpt.com/ in everyday Chrome is not enough: `setup` / `login` opens a dedicated Chrome window, copies allowlisted ChatGPT cookies into a private profile, then closes that window. Use passkeys or the same Google account in that window. Temporary Chat is a ChatGPT privacy mode, not anonymity. This project is unofficial.
 
 ### Simulated MCP (no ChatGPT login)
 
@@ -126,6 +125,7 @@ cursor-chatgpt-web cursor-status
 cursor-chatgpt-web test-gpt-web --simulate
 cursor-chatgpt-web cursor-serve
 cursor-chatgpt-web probe --checklist
+cursor-chatgpt-web probe-subagent
 cursor-chatgpt-web mcp          # original Codex Native connector
 ```
 

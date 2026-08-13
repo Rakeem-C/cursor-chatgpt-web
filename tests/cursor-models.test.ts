@@ -6,7 +6,11 @@ import {
   requireCursorChatGptWebRoute,
 } from "../src/chatgpt-web-models";
 import { detectChatGptWebCapabilities } from "../src/cursor/capabilities";
+import { reviewCapturedFixtures } from "../src/cursor/fixtures/review";
 import { resolveChatGptWebModelMode } from "../src/adapters/chatgpt-web/model";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 describe("Cursor-facing GPT Web model IDs", () => {
   const plus = { solAvailable: true, proAvailable: false };
@@ -39,14 +43,22 @@ describe("Cursor-facing GPT Web model IDs", () => {
       solAvailable: true,
       proAvailable: false,
     }).uiEffortIndex).toBe(2);
-    const plusCaps = detectChatGptWebCapabilities(plus);
-    expect(plusCaps.defaultMode).toBe("high");
-    expect(plusCaps.highAvailable).toBe(true);
-    expect(plusCaps.extraHighAvailable).toBe(false);
-    expect(plusCaps.modes.find(mode => mode.mode === "pro")?.available).toBe(false);
-    const luna = detectChatGptWebCapabilities({ solAvailable: false, proAvailable: false });
-    expect(luna.lunaOnly).toBe(true);
-    expect(luna.defaultMode).toBe("luna");
-    expect(luna.highAvailable).toBe(false);
+    const emptyDir = mkdtempSync(join(tmpdir(), "cursor-chatgpt-web-caps-"));
+    try {
+      const empty = reviewCapturedFixtures(emptyDir);
+      const plusCaps = detectChatGptWebCapabilities(plus, empty);
+      expect(plusCaps.defaultMode).toBe("high");
+      expect(plusCaps.highAvailable).toBe(true);
+      expect(plusCaps.extraHighAvailable).toBe(false);
+      expect(plusCaps.pickerMode).toBe("experimental");
+      expect(plusCaps.nativeTaskMode).toBe("probe_only");
+      expect(plusCaps.modes.find(mode => mode.mode === "pro")?.available).toBe(false);
+      const luna = detectChatGptWebCapabilities({ solAvailable: false, proAvailable: false }, empty);
+      expect(luna.lunaOnly).toBe(true);
+      expect(luna.defaultMode).toBe("luna");
+      expect(luna.highAvailable).toBe(false);
+    } finally {
+      rmSync(emptyDir, { recursive: true, force: true });
+    }
   });
 });

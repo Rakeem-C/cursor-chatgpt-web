@@ -5,7 +5,9 @@ These are the revised critical scenarios. Automated coverage lives under `tests/
 | Scenario | Expected | Coverage |
 | --- | --- | --- |
 | Parent asks GPT Web for review | one new Temporary Chat | `tests/cursor-specialist.test.ts` fresh envelope |
-| Same delegated job continues | same Temporary Chat / tab | TabPool same `jobId` reuses slot; one `turn()` holds the lease |
+| Same delegated job continues | same Temporary Chat / tab | TabPool same `jobId` reuses slot; tool roundtrips keep the lease |
+| GPT Web asks for a Cursor tool | `awaitingTools` + `toolCalls`; tab held | `tests/cursor-phase6.test.ts` |
+| Parent returns tool results | same job, same Temporary Chat | continuation envelope + simulated HTTP test |
 | New delegated job | new Temporary Chat | independent jobs do not share history |
 | Explicit same threadId | persistent specialist | thread history replayed after tab release |
 | Two independent tasks | two isolated chats | separate threadIds |
@@ -23,14 +25,15 @@ These are the revised critical scenarios. Automated coverage lives under `tests/
 | Plus cannot select Extra High/Pro | fail closed | specialist capability test |
 | Luna-only cannot select High | fail closed | specialist Luna test |
 | HTTP images parsed | forwarded to the worker | protocol image test |
-| HTTP tools in V1 | ignored, not executed | `ignoredToolCount` |
+| HTTP tools | forwarded as GPT Web proposals; not executed by this daemon | protocol tool_calls test; `ignoredToolCount` |
 | Installer writes MCP without clobbering | merge + uninstall | installer test |
 | Simulated High smoke | `test-gpt-web --simulate` | CLI test |
 
 Live proof still required on a real machine:
 
 1. Sign in to ChatGPT once through the launcher.
-2. `cursor-chatgpt-web install-cursor` then restart Cursor.
+2. `cursor-chatgpt-web setup --browser-only` now writes Cursor MCP; restart Cursor.
 3. Parent (Grok / Claude / Composer) calls `chatgpt_web_turn` with mode `high`.
 4. A Temporary Chat opens with High selected.
-5. `probe --checklist` against the installed Cursor build before calling the picker supported.
+5. `probe --checklist` and `probe-subagent` against the installed Cursor build before calling the picker or native Task supported.
+6. If GPT Web returns `awaitingTools`, the parent must execute those tools and continue with the same `jobId`.

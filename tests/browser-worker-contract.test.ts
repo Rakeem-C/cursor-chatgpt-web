@@ -16,6 +16,13 @@ test("Codex context uses the owned CDP composer transport, never the operating-s
   expect(workerSource).not.toMatch(/\bclipboard\b|pbcopy|pbpaste/i);
 });
 
+test("Cursor session hold is opt-in; Codex still opens a fresh Temporary Chat per turn", () => {
+  const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  expect(workerSource).toContain("A Codex turn owns one isolated Temporary Chat document");
+  expect(workerSource).toContain("shouldRetainManagedBrowserSession");
+  expect(workerSource).toContain("sessionHoldKey");
+});
+
 test("completed prompts activate the scoped semantic send control", () => {
   const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
   expect(workerSource).toContain('.getByTestId("send-button")');

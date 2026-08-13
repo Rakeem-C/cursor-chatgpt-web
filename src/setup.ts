@@ -82,6 +82,17 @@ export function existingFullSetupCredentials(existing: AppConfig | undefined): E
   };
 }
 
+export function terminalManagedServiceSupported(platform = process.platform): boolean {
+  return platform === "darwin";
+}
+
+export function cursorBrowserOnlySkipsCodexRuntime(
+  options: Pick<SetupOptions, "mode">,
+  platform = process.platform,
+): boolean {
+  return options.mode === "browser-only" && !terminalManagedServiceSupported(platform);
+}
+
 function loadExistingConfig(): AppConfig | undefined {
   if (!existsSync(getConfigPath())) return undefined;
   return loadConfigForSetup();
@@ -266,15 +277,19 @@ export async function setup(options: SetupOptions): Promise<SetupResult> {
   const existing = loadExistingConfig();
   const config = baseConfig(existing, options);
   const launcherOwned = config.browserHost === "launcher";
-  if (!launcherOwned && process.platform !== "darwin") {
+  const managedService = terminalManagedServiceSupported();
+  const skipCodexRuntime = !launcherOwned && cursorBrowserOnlySkipsCodexRuntime(options);
+  if (!launcherOwned && !managedService && options.mode !== "browser-only") {
     throw new Error(
-      "Terminal-only managed Chrome setup currently requires macOS. "
-      + "Use the Codex Web GPT launcher on Windows or Linux.",
+      "Terminal-only full-mode setup currently requires macOS. "
+      + "On Windows or Linux use browser-only Cursor MCP setup, or the Codex Web GPT launcher.",
     );
   }
-  preflightCodexIntegration(config, {
-    replaceExistingRoute: options.replaceCodexRoute,
-  });
+  if (!skipCodexRuntime) {
+    preflightCodexIntegration(config, {
+      replaceExistingRoute: options.replaceCodexRoute,
+    });
+  }
   const refreshTunnelWorker = tunnelWorkerRuntimeChanged(existing, config);
   if (existing && options.restartService) config.controlToken = randomBytes(32).toString("base64url");
   const beforeService = getServiceStatus();
@@ -359,9 +374,11 @@ export async function setup(options: SetupOptions): Promise<SetupResult> {
 
   if (!launcherOwned) {
     saveConfig(config);
-    installService(config);
-    if (changedWhileLoaded && options.restartService && existing) await restartService(existing);
-    await waitForProxy(config);
+    if (managedService) {
+      installService(config);
+      if (changedWhileLoaded && options.restartService && existing) await restartService(existing);
+      await waitForProxy(config);
+    }
   }
 
   let tunnelReady: boolean | null = null;
@@ -405,9 +422,11 @@ export async function setup(options: SetupOptions): Promise<SetupResult> {
     launcherOwned && existing && existing.browserHost !== "launcher",
   );
   if (!migratingTerminalRuntime) removeLegacyRuntimeArtifacts(config);
-  installCodexIntegration(config, {
-    replaceExistingRoute: options.replaceCodexRoute,
-  });
+  if (!skipCodexRuntime) {
+    installCodexIntegration(config, {
+      replaceExistingRoute: options.replaceCodexRoute,
+    });
+  }
 
   return {
     mode: config.mode,

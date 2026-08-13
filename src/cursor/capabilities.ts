@@ -6,6 +6,7 @@ import {
   type ChatGptWebAccountCapabilities,
   type CursorChatGptWebMode,
 } from "../chatgpt-web-models";
+import { reviewCapturedFixtures, type FixtureReview } from "./fixtures/review";
 
 const ALL_CURSOR_ROUTES = [CHATGPT_WEB_LUNA_MODEL_ROUTE, ...CHATGPT_WEB_MODEL_ROUTES] as const;
 
@@ -14,6 +15,9 @@ export interface DetectedChatGptWebCapabilities extends ChatGptWebAccountCapabil
   highAvailable: boolean;
   extraHighAvailable: boolean;
   defaultMode: CursorChatGptWebMode;
+  pickerMode: FixtureReview["pickerMode"];
+  nativeTaskMode: FixtureReview["nativeTaskMode"];
+  fixtures: FixtureReview;
   modes: Array<{
     mode: CursorChatGptWebMode;
     cursorId: string;
@@ -25,6 +29,7 @@ export interface DetectedChatGptWebCapabilities extends ChatGptWebAccountCapabil
 
 export function detectChatGptWebCapabilities(
   capabilities: ChatGptWebAccountCapabilities,
+  fixtures = reviewCapturedFixtures(),
 ): DetectedChatGptWebCapabilities {
   const lunaOnly = !capabilities.solAvailable;
   const availableIds = new Set(availableCursorChatGptWebRoutes(capabilities).map(route => route.cursorId));
@@ -36,6 +41,9 @@ export function detectChatGptWebCapabilities(
     highAvailable: availableIds.has("chatgpt-web-high"),
     extraHighAvailable: availableIds.has("chatgpt-web-extra-high"),
     defaultMode: lunaOnly ? "luna" : CURSOR_CHATGPT_WEB_DEFAULT_MODE,
+    pickerMode: fixtures.pickerMode,
+    nativeTaskMode: fixtures.nativeTaskMode,
+    fixtures,
     modes: ALL_CURSOR_ROUTES.map(route => {
       const available = availableIds.has(route.cursorId);
       let reason: string | undefined;
