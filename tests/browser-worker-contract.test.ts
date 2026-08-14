@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { Page } from "playwright-core";
-import { CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_PROMPT_INSERT_CHUNK_CHARS, ChatGptBrowserWorker, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_TABS, assertChatGptWebInputWithinLimits, browserDiagnosticCheckpoint, browserDiagnosticIncludesScreenshot, chatGptSubmissionEvidence, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert } from "../src/adapters/chatgpt-web/browser-worker";
+import { CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_PROMPT_INSERT_CHUNK_CHARS, ChatGptBrowserWorker, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_TABS, assertChatGptWebInputWithinLimits, browserDiagnosticCheckpoint, browserDiagnosticIncludesScreenshot, chatGptComposerElementAcceptsInput, chatGptComposerPromptMismatchError, chatGptSubmissionEvidence, isChatGptTraceControl, isEmptyChatGptComposerAttachmentError, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert } from "../src/adapters/chatgpt-web/browser-worker";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import { compileChatGptWebPrompt } from "../src/adapters/chatgpt-web/prompt";
 import { CHATGPT_CONNECTOR_NAME, defaultChromeExecutable } from "../src/config";
@@ -13,6 +13,9 @@ test("Codex context uses the owned CDP composer transport, never the operating-s
   expect(workerSource).toContain('composer.fill("")');
   expect(workerSource).toContain("this.insertPromptText(page, prompt, abortSignal)");
   expect(workerSource).toContain("this.insertPromptText(page, ` ${prompt}`, abortSignal)");
+  expect(workerSource).toContain("await composer.fill(prompt)");
+  expect(workerSource).toContain("activateComposerForInsert");
+  expect(workerSource).toContain("waitForComposerToAcceptInput");
   expect(workerSource).not.toMatch(/\bclipboard\b|pbcopy|pbpaste/i);
 });
 
@@ -211,6 +214,15 @@ test("active composer resolution waits for exactly one visible editor", async ()
   expect(await activeComposer.call({}, page, 500)).toBe(composer);
 });
 
+function attachPromptHost(overrides: Record<string, unknown>) {
+  const proto = ChatGptBrowserWorker.prototype as unknown as Record<string, unknown>;
+  return {
+    waitForComposerToAcceptInput: proto.waitForComposerToAcceptInput,
+    activateComposerForInsert: proto.activateComposerForInsert,
+    ...overrides,
+  };
+}
+
 test("large read-only context is inserted as contiguous bounded edits before exact verification", async () => {
   const prompt = `Act as the model backend for the Codex task encoded below.\n${"x".repeat(819_343)}`;
   const calls: Array<[string, string?]> = [];
@@ -218,6 +230,8 @@ test("large read-only context is inserted as contiguous bounded edits before exa
   const composer = {
     fill: async (value: string) => { calls.push(["fill", value]); },
     focus: async () => { calls.push(["focus"]); },
+    click: async () => { calls.push(["click"]); },
+    evaluate: async () => true,
   };
   const page = {
     keyboard: {
@@ -232,7 +246,7 @@ test("large read-only context is inserted as contiguous bounded edits before exa
     insertPromptText(page: unknown, text: string): Promise<void>;
   }).insertPromptText;
 
-  await attachPrompt.call({
+  await attachPrompt.call(attachPromptHost({
     activeComposer: async () => composer,
     insertPromptText,
     waitForPromptChunkAttached: async (_page: unknown, expected: string) => {
@@ -240,11 +254,11 @@ test("large read-only context is inserted as contiguous bounded edits before exa
     },
     reanchorPromptCaret: async () => { calls.push(["reanchor"]); },
     assertPromptAttached: async (_page: unknown, value: string) => { asserted = value; },
-  }, page, prompt, false);
+  }), page, prompt, false);
 
   const inserted = calls.filter(call => call[0] === "insertText").map(call => call[1] ?? "");
   const fullChunkCount = Math.floor((prompt.length - 1) / CHATGPT_PROMPT_INSERT_CHUNK_CHARS);
-  expect(calls.slice(0, 2)).toEqual([["fill", ""], ["focus"]]);
+  expect(calls.slice(0, 2)).toEqual([["fill", ""], ["click"]]);
   expect(inserted.every(chunk => chunk.length <= CHATGPT_PROMPT_INSERT_CHUNK_CHARS)).toBeTrue();
   expect(inserted.length).toBe(Math.ceil(prompt.length / CHATGPT_PROMPT_INSERT_CHUNK_CHARS));
   expect(inserted.join("")).toBe(prompt);
@@ -257,6 +271,165 @@ test("large read-only context is inserted as contiguous bounded edits before exa
   expect(calls.filter(call => call[0] === "reanchor")).toHaveLength(fullChunkCount);
   expect(calls.filter(call => call[0] === "press")).toEqual([]);
   expect(asserted).toBe(prompt);
+});
+
+test("a ProseMirror or Lexical composer is ready only when it can actually accept input", () => {
+  const probe = (overrides: Partial<Parameters<typeof chatGptComposerElementAcceptsInput>[0]> = {}) => {
+    const base: Parameters<typeof chatGptComposerElementAcceptsInput>[0] = {
+      isContentEditable: true,
+      id: "prompt-textarea",
+      tagName: "DIV",
+      classList: { contains: (name: string) => name === "ProseMirror" },
+      getAttribute: (name: string) => {
+        if (name === "contenteditable") return "true";
+        if (name === "data-testid") return "prompt-textarea";
+        return null;
+      },
+      getBoundingClientRect: () => ({ width: 400, height: 48 }),
+      querySelector: () => null,
+    };
+    return { ...base, ...overrides };
+  };
+  expect(chatGptComposerElementAcceptsInput(probe())).toBe(true);
+  expect(chatGptComposerElementAcceptsInput(probe({
+    isContentEditable: false,
+    getAttribute: () => null,
+    classList: { contains: () => false },
+  }))).toBe(false);
+  expect(chatGptComposerElementAcceptsInput(probe({
+    getBoundingClientRect: () => ({ width: 0, height: 0 }),
+  }))).toBe(false);
+  expect(chatGptComposerElementAcceptsInput(probe({
+    tagName: "TEXTAREA",
+    isContentEditable: false,
+    classList: { contains: () => false },
+    getAttribute: (name: string) => name === "disabled" ? "" : null,
+  }))).toBe(false);
+  expect(chatGptComposerElementAcceptsInput(probe({
+    tagName: "TEXTAREA",
+    isContentEditable: false,
+    classList: { contains: () => false },
+    getAttribute: () => null,
+  }))).toBe(true);
+});
+
+test("empty composer attachment is retryable; a partial insert is not", () => {
+  expect(isEmptyChatGptComposerAttachmentError(
+    chatGptComposerPromptMismatchError("hello world", ""),
+  )).toBe(true);
+  expect(isEmptyChatGptComposerAttachmentError(
+    chatGptComposerPromptMismatchError("hello world", "hello"),
+  )).toBe(false);
+  expect(isEmptyChatGptComposerAttachmentError(new Error("timeout"))).toBe(false);
+});
+
+test("composer insert waits until the editor accepts input", async () => {
+  const ready = [false, false, true];
+  const composer = { evaluate: async () => ready.shift() ?? true };
+  const waitForComposerToAcceptInput = (ChatGptBrowserWorker.prototype as unknown as {
+    waitForComposerToAcceptInput(page: unknown): Promise<unknown>;
+  }).waitForComposerToAcceptInput;
+  expect(await waitForComposerToAcceptInput.call({
+    activeComposer: async () => composer,
+  }, {})).toBe(composer);
+  expect(ready).toEqual([]);
+});
+
+test("empty composer insert retries with a focused fill and fails closed if still empty", async () => {
+  const prompt = "Reply with exactly: LIVE_PROOF_NEW_ACCOUNT";
+  const calls: string[] = [];
+  const composer = {
+    fill: async (value: string) => { calls.push(`fill:${value.length}`); },
+    focus: async () => { calls.push("focus"); },
+    click: async (options?: { force?: boolean }) => { calls.push(options?.force ? "click-force" : "click"); },
+    evaluate: async () => true,
+  };
+  const page = { keyboard: { insertText: async () => { calls.push("insertText"); } } };
+  const attachPrompt = (ChatGptBrowserWorker.prototype as unknown as {
+    attachPrompt(page: unknown, prompt: string, localTools: boolean): Promise<void>;
+  }).attachPrompt;
+  const insertPromptText = (ChatGptBrowserWorker.prototype as unknown as {
+    insertPromptText(page: unknown, text: string): Promise<void>;
+  }).insertPromptText;
+
+  await expect(attachPrompt.call(attachPromptHost({
+    activeComposer: async () => composer,
+    insertPromptText,
+    waitForPromptChunkAttached: async () => {},
+    reanchorPromptCaret: async () => {},
+    assertPromptAttached: async () => {
+      calls.push("assert");
+      throw chatGptComposerPromptMismatchError(prompt, "");
+    },
+  }), page, prompt, false)).rejects.toThrow(/actualChars=0/);
+
+  expect(calls.filter(call => call === "insertText")).toHaveLength(2);
+  expect(calls.filter(call => call === `fill:${prompt.length}`)).toEqual([`fill:${prompt.length}`]);
+  expect(calls.filter(call => call === "assert")).toHaveLength(3);
+  expect(calls.filter(call => call === "click-force")).toHaveLength(2);
+  expect(calls).not.toContain("success");
+});
+
+test("a partial composer insert fails closed without wiping the landed prefix", async () => {
+  const prompt = "hello world";
+  let asserts = 0;
+  const composer = {
+    fill: async () => {},
+    click: async () => {},
+    focus: async () => {},
+    evaluate: async () => true,
+  };
+  const attachPrompt = (ChatGptBrowserWorker.prototype as unknown as {
+    attachPrompt(page: unknown, prompt: string, localTools: boolean): Promise<void>;
+  }).attachPrompt;
+
+  await expect(attachPrompt.call(attachPromptHost({
+    activeComposer: async () => composer,
+    insertPromptText: async () => {},
+    assertPromptAttached: async () => {
+      asserts += 1;
+      throw chatGptComposerPromptMismatchError(prompt, "hello");
+    },
+  }), {}, prompt, false)).rejects.toThrow(/actualChars=5/);
+  expect(asserts).toBe(1);
+});
+
+test("empty composer attach succeeds on the ProseMirror fill retry", async () => {
+  const prompt = "hello from a cold composer";
+  let attached = "";
+  const composer = {
+    fill: async (value: string) => { attached = value; },
+    click: async () => {},
+    focus: async () => {},
+    evaluate: async () => true,
+  };
+  const page = {
+    keyboard: {
+      insertText: async () => {
+        // Cold unfocused ProseMirror discards CDP insertText.
+      },
+    },
+  };
+  const attachPrompt = (ChatGptBrowserWorker.prototype as unknown as {
+    attachPrompt(page: unknown, prompt: string, localTools: boolean): Promise<void>;
+  }).attachPrompt;
+  const insertPromptText = (ChatGptBrowserWorker.prototype as unknown as {
+    insertPromptText(page: unknown, text: string): Promise<void>;
+  }).insertPromptText;
+  const assertPromptAttached = (ChatGptBrowserWorker.prototype as unknown as {
+    assertPromptAttached(page: unknown, prompt: string, abortSignal?: AbortSignal, timeoutMs?: number): Promise<void>;
+  }).assertPromptAttached;
+
+  await attachPrompt.call(attachPromptHost({
+    activeComposer: async () => composer,
+    insertPromptText,
+    waitForPromptChunkAttached: async () => {},
+    reanchorPromptCaret: async () => {},
+    attachedPromptText: async () => attached,
+    assertPromptAttached,
+  }), page, prompt, false);
+
+  expect(attached).toBe(prompt);
 });
 
 test("multi-chunk prompt insertion repairs a drifted Lexical caret after each exact prefix", async () => {
@@ -600,6 +773,8 @@ test("tool-capable prompts use the shared Playwright connector selection before 
   };
   const selectedComposer = {
     focus: async () => { calls.push(["selectedFocus"]); },
+    click: async () => { calls.push(["selectedClick"]); },
+    evaluate: async () => true,
     locator: () => ({ filter: () => selectedConnector }),
   };
   const initialComposer = {
@@ -628,7 +803,7 @@ test("tool-capable prompts use the shared Playwright connector selection before 
   }).insertPromptText;
 
   let activeComposerCalls = 0;
-  await attachPrompt.call({
+  await attachPrompt.call(attachPromptHost({
     config: { appName: "Codex Native2" },
     selectConnector,
     insertPromptText,
@@ -640,7 +815,7 @@ test("tool-capable prompts use the shared Playwright connector selection before 
     },
     reanchorPromptCaret: async () => { calls.push(["reanchor"]); },
     assertPromptAttached: async () => { calls.push(["assertPrompt"]); },
-  }, page, "context", true);
+  }), page, "context", true);
 
   expect(calls).toEqual([
     ["fill", ""],
@@ -650,7 +825,7 @@ test("tool-capable prompts use the shared Playwright connector selection before 
     ["connectorMenu"],
     ["selectConnector"],
     ["selectedConnector"],
-    ["selectedFocus"],
+    ["selectedClick"],
     ["press", CHATGPT_COMPOSER_DOCUMENT_END_KEY],
     ["insertText", " context"],
     ["assertPrompt"],
@@ -728,6 +903,8 @@ test("effort selection uses structural menu and slider indices instead of locali
   const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
   const sessionSource = readFileSync(new URL("../src/chatgpt-session.ts", import.meta.url), "utf8");
   expect(workerSource).toContain("mode.uiEffortIndex");
+  expect(workerSource).toContain("chatGptEffortControlShowsMode");
+  expect(workerSource).toContain("effort-already-selected");
   expect(workerSource).toContain("CHATGPT_EFFORT_MENU_SELECTOR");
   expect(workerSource).toContain("CHATGPT_EFFORT_ITEM_SELECTOR");
   expect(workerSource).toContain('timeout: 70_000');
@@ -794,6 +971,125 @@ test("Luna-only browser turns verify selector absence instead of opening an effo
 
   expect(mode).toMatchObject({ displayLabel: "Luna", uiEffortIndex: null });
   expect(checkpoints).toEqual(["luna-default-confirmed"]);
+});
+
+function selectModelAndEffort() {
+  return (ChatGptBrowserWorker.prototype as unknown as {
+    selectModelAndEffort(
+      page: unknown,
+      modelId: string,
+      reasoning: string,
+      capabilities: { localToolsEnabled: boolean; solAvailable: boolean; proAvailable: boolean },
+      captureDiagnostic: (checkpoint: string) => Promise<void>,
+    ): Promise<{ displayLabel: string; uiEffortIndex: number | null }>;
+  }).selectModelAndEffort;
+}
+
+function hiddenRateLimitDialog() {
+  const dialog = {
+    filter() { return this; },
+    last() { return this; },
+    isVisible: async () => false,
+    getByRole() { return this; },
+    waitFor: async () => {
+      throw Object.assign(new Error("waitFor: Timeout"), { name: "TimeoutError" });
+    },
+  };
+  return dialog;
+}
+
+function effortSelectionPage(options: {
+  controlLabel: string;
+  itemWait?: () => Promise<never>;
+}): {
+  page: unknown;
+  composer: unknown;
+  waitedForItems: { count: number };
+  menuOpened: { count: number };
+} {
+  const waitedForItems = { count: 0 };
+  const menuOpened = { count: 0 };
+  const timeout = Object.assign(new Error("waitFor: Timeout 1ms exceeded."), { name: "TimeoutError" });
+  const dialog = hiddenRateLimitDialog();
+  const effortChoice = {
+    waitFor: async () => {
+      waitedForItems.count += 1;
+      if (options.itemWait) return await options.itemWait();
+      throw timeout;
+    },
+    getAttribute: async () => null,
+    press: async () => {},
+  };
+  const effortChoices = {
+    nth: () => effortChoice,
+    first: () => effortChoice,
+    count: async () => 0,
+    waitFor: effortChoice.waitFor,
+  };
+  const effortMenu = {
+    last() { return this; },
+    locator: () => effortChoices,
+    isVisible: async () => false,
+  };
+  const slider = {
+    last() { return this; },
+    filter() { return this; },
+    waitFor: async () => { throw timeout; },
+    getAttribute: async () => null,
+    locator: () => ({ press: async () => {} }),
+  };
+  const currentEffort = {
+    last() { return this; },
+    waitFor: async () => {},
+    innerText: async () => options.controlLabel,
+    getAttribute: async (name: string) => name === "aria-expanded" ? "false" : null,
+    press: async () => { menuOpened.count += 1; },
+  };
+  const composerForm = { locator: () => currentEffort };
+  const composer = { locator: () => composerForm };
+  const page = {
+    locator: (selector: string) => {
+      if (selector.includes('[role="dialog"]')) return dialog;
+      if (selector.includes('[role="slider"]')) return slider;
+      return effortMenu;
+    },
+    keyboard: { press: async () => {} },
+  };
+  return { page, composer, waitedForItems, menuOpened };
+}
+
+test("already High closed control does not require a populated effort menu", async () => {
+  const checkpoints: string[] = [];
+  const { page, composer, waitedForItems, menuOpened } = effortSelectionPage({ controlLabel: "High" });
+  const mode = await selectModelAndEffort().call({
+    activeComposer: async () => composer,
+  }, page, CHATGPT_WEB_MODEL_ID, "high", {
+    localToolsEnabled: true,
+    solAvailable: true,
+    proAvailable: false,
+  }, async checkpoint => { checkpoints.push(checkpoint); });
+
+  expect(mode).toMatchObject({ displayLabel: "High", uiEffortIndex: 2 });
+  expect(checkpoints).toEqual(["effort-control-ready", "effort-already-selected"]);
+  expect(waitedForItems.count).toBe(0);
+  expect(menuOpened.count).toBe(0);
+});
+
+test("High fails closed when the closed control is Instant and the menu is empty", async () => {
+  const checkpoints: string[] = [];
+  const { page, composer, menuOpened } = effortSelectionPage({ controlLabel: "Instant" });
+  await expect(selectModelAndEffort().call({
+    activeComposer: async () => composer,
+  }, page, CHATGPT_WEB_MODEL_ID, "high", {
+    localToolsEnabled: true,
+    solAvailable: true,
+    proAvailable: false,
+  }, async checkpoint => { checkpoints.push(checkpoint); })).rejects.toThrow(
+    /ChatGPT effort menu did not expose item index 2; item count: 0/,
+  );
+  expect(checkpoints).toContain("effort-control-ready");
+  expect(checkpoints).not.toContain("effort-already-selected");
+  expect(menuOpened.count).toBe(1);
 });
 
 test("effort selection handles the known ChatGPT rate-limit dialog before keyboard activation", () => {
@@ -1126,12 +1422,14 @@ test("browser stage diagnostics preserve every critical local checkpoint", () =>
     "composer-ready",
     "session-verified",
     "effort-control-ready",
+    "effort-already-selected",
     "effort-menu-open-requested",
     "effort-selected",
     "connector-mention-triggered",
     "connector-menu-visible",
     "connector-menu-missing",
     "connector-selected",
+    "prompt-attach-retry",
     "prompt-attachment-complete",
     "file-attachment-complete",
     "send-ready",

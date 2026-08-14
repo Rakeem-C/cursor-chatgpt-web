@@ -1,10 +1,15 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod/v4";
 import { VERSION } from "../version";
 import { isCursorChatGptWebError } from "./errors";
 import { CURSOR_GPT_WEB_MCP_INSTRUCTIONS } from "./policy";
 import { getCursorSpecialistRuntime } from "./runtime";
+import { routeStdioMcpLogsToStderr } from "./stdio-logs";
 import type { SpecialistImage, SpecialistToolResult, SpecialistToolSpec, SpecialistTurnResult } from "./task-session";
 
 const modeSchema = z.enum(["instant", "medium", "high", "extra-high", "pro", "luna"]).optional();
@@ -80,11 +85,21 @@ function publicTurn(result: SpecialistTurnResult) {
   };
 }
 
+export function attachEmptyMcpCatalogs(server: McpServer): void {
+  server.server.registerCapabilities({ resources: {} });
+  server.server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [] }));
+  server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+    resourceTemplates: [],
+  }));
+}
+
 export async function runCursorChatGptWebMcpServer(): Promise<void> {
+  routeStdioMcpLogsToStderr();
   const server = new McpServer(
     { name: "cursor-chatgpt-web", version: VERSION },
     { instructions: CURSOR_GPT_WEB_MCP_INSTRUCTIONS },
   );
+  attachEmptyMcpCatalogs(server);
   const runtime = () => getCursorSpecialistRuntime();
 
   server.registerTool(

@@ -45,6 +45,7 @@ import {
   detectChatGptAccountCapabilities,
   parseChatGptEffortSliderState,
 } from "../../chatgpt-session";
+import { chatGptEffortControlShowsMode } from "../../chatgpt-effort-control";
 import { loginVerificationMarkerPath } from "../../browser-login";
 import {
   connectLauncherBrowserHost,
@@ -254,6 +255,60 @@ export const CHATGPT_PROMPT_INSERT_CHUNK_CHARS = 100_000;
 export const CHATGPT_COMPOSER_DOCUMENT_END_KEY = process.platform === "darwin"
   ? "Meta+ArrowDown"
   : "Control+End";
+export const CHATGPT_PROMPT_ATTACH_ATTEMPTS = 3;
+export const CHATGPT_PROMPT_ATTACH_EMPTY_RETRY_MS = 1_500;
+export const CHATGPT_PROMPT_ATTACH_VERIFY_MS = 10_000;
+
+export interface ChatGptComposerInputProbe {
+  isContentEditable: boolean;
+  id: string;
+  tagName?: string;
+  classList: { contains(name: string): boolean };
+  getAttribute(name: string): string | null;
+  getBoundingClientRect(): { width: number; height: number };
+  querySelector(selector: string): ChatGptComposerInputProbe | null;
+}
+
+export function chatGptComposerElementAcceptsInput(element: ChatGptComposerInputProbe): boolean {
+  const tag = String(element.tagName ?? "").toUpperCase();
+  const bounds = element.getBoundingClientRect();
+  if (bounds.width < 8 || bounds.height < 8) return false;
+  if (tag === "TEXTAREA" || tag === "INPUT") {
+    return element.getAttribute("disabled") === null;
+  }
+  const root = element.getAttribute("contenteditable") === "true" || element.isContentEditable
+    ? element
+    : element.querySelector('[contenteditable="true"]');
+  if (!root) return false;
+  if (root.getAttribute("contenteditable") === "false") return false;
+  if (root.getAttribute("aria-disabled") === "true") return false;
+  const rootBounds = root === element ? bounds : root.getBoundingClientRect();
+  if (rootBounds.width < 8 || rootBounds.height < 8) return false;
+  return (root.getAttribute("contenteditable") === "true" || root.isContentEditable)
+    && (
+      root.classList.contains("ProseMirror")
+      || root.getAttribute("data-lexical-editor") === "true"
+      || root.getAttribute("role") === "textbox"
+      || root.id === "prompt-textarea"
+      || root.getAttribute("data-testid") === "prompt-textarea"
+    );
+}
+
+export function chatGptComposerPromptMismatchError(expected: string, observed: string): Error {
+  let commonPrefix = 0;
+  while (commonPrefix < expected.length && expected[commonPrefix] === observed[commonPrefix]) {
+    commonPrefix += 1;
+  }
+  return new Error(
+    `ChatGPT composer did not preserve the complete prompt (expectedChars=${expected.length}, actualChars=${observed.length}, commonPrefixChars=${commonPrefix})`,
+  );
+}
+
+export function isEmptyChatGptComposerAttachmentError(error: unknown): boolean {
+  return error instanceof Error
+    && /actualChars=0/.test(error.message)
+    && /expectedChars=[1-9]/.test(error.message);
+}
 
 function throwIfPromptAttachmentAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("ChatGPT prompt attachment aborted", "AbortError");
@@ -963,6 +1018,12 @@ export class ChatGptBrowserWorker {
     await settleChatGptUi();
     await throwIfChatGptRateLimitDialog(page);
     await captureDiagnostic?.("effort-control-ready");
+    const closedControlLabel = await currentEffort.innerText().catch(() => "");
+    const closedControlAria = await currentEffort.getAttribute("aria-label").catch(() => null);
+    if (chatGptEffortControlShowsMode([closedControlLabel, closedControlAria], mode.displayLabel)) {
+      await captureDiagnostic?.("effort-already-selected");
+      return mode;
+    }
     const effortMenu = page.locator(CHATGPT_EFFORT_MENU_SELECTOR).last();
     const menuVisible = await effortMenu.isVisible().catch(() => false);
     const menuExpanded = await currentEffort.getAttribute("aria-expanded").catch(() => null);
@@ -1181,8 +1242,9 @@ export class ChatGptBrowserWorker {
     page: Page,
     prompt: string,
     abortSignal?: AbortSignal,
+    timeoutMs = CHATGPT_PROMPT_ATTACH_VERIFY_MS,
   ): Promise<void> {
-    const deadline = Date.now() + 10_000;
+    const deadline = Date.now() + timeoutMs;
     let observed = "";
     while (Date.now() < deadline) {
       throwIfPromptAttachmentAborted(abortSignal);
@@ -1192,11 +1254,34 @@ export class ChatGptBrowserWorker {
       await new Promise(resolveSleep => setTimeout(resolveSleep, 50));
     }
     throwIfPromptAttachmentAborted(abortSignal);
-    let commonPrefix = 0;
-    while (commonPrefix < prompt.length && prompt[commonPrefix] === observed[commonPrefix]) commonPrefix += 1;
-    throw new Error(
-      `ChatGPT composer did not preserve the complete prompt (expectedChars=${prompt.length}, actualChars=${observed.length}, commonPrefixChars=${commonPrefix})`,
-    );
+    throw chatGptComposerPromptMismatchError(prompt, observed);
+  }
+
+  private async waitForComposerToAcceptInput(page: Page, abortSignal?: AbortSignal): Promise<Locator> {
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      throwIfPromptAttachmentAborted(abortSignal);
+      const remaining = Math.max(50, deadline - Date.now());
+      const composer = await this.activeComposer(page, Math.min(5_000, remaining));
+      const ready = await composer.evaluate(chatGptComposerElementAcceptsInput).catch(() => false);
+      if (ready) return composer;
+      await new Promise(resolveSleep => setTimeout(resolveSleep, 50));
+    }
+    throw new Error("ChatGPT composer did not become ready to accept input");
+  }
+
+  private async activateComposerForInsert(composer: Locator, force = false): Promise<void> {
+    try {
+      await composer.click({ timeout: 10_000, ...(force ? { force: true } : {}) });
+    } catch {
+      await composer.focus();
+      await composer.click({ force: true, timeout: 5_000 }).catch(() => {});
+    }
+    const focused = await composer.evaluate(element => {
+      const active = document.activeElement;
+      return !!active && (active === element || element.contains(active));
+    }).catch(() => false);
+    if (!focused) await composer.focus();
   }
 
   private selectedConnectorControl(composer: Locator): Locator {
@@ -1319,22 +1404,45 @@ export class ChatGptBrowserWorker {
     abortSignal?: AbortSignal,
   ): Promise<void> {
     throwIfPromptAttachmentAborted(abortSignal);
-    if (!localTools) {
-      const composer = await this.activeComposer(page);
-      // Playwright's multiline fill maps through an input action that ChatGPT's Lexical editor can
-      // collapse to the first paragraph on the launcher-owned Electron surface. Clear separately,
-      // then transport the complete text in one CDP Input.insertText command.
-      await composer.fill("");
-      await composer.focus();
-      await this.insertPromptText(page, prompt, abortSignal);
+    if (localTools) {
+      const selectedComposer = await this.selectConnector(page, captureDiagnostic);
+      await this.activateComposerForInsert(selectedComposer);
+      await page.keyboard.press(CHATGPT_COMPOSER_DOCUMENT_END_KEY);
+      await this.insertPromptText(page, ` ${prompt}`, abortSignal);
       await this.assertPromptAttached(page, prompt, abortSignal);
       return;
     }
-    const selectedComposer = await this.selectConnector(page, captureDiagnostic);
-    await selectedComposer.focus();
-    await page.keyboard.press(CHATGPT_COMPOSER_DOCUMENT_END_KEY);
-    await this.insertPromptText(page, ` ${prompt}`, abortSignal);
-    await this.assertPromptAttached(page, prompt, abortSignal);
+    let lastError: Error | undefined;
+    for (let attempt = 1; attempt <= CHATGPT_PROMPT_ATTACH_ATTEMPTS; attempt++) {
+      throwIfPromptAttachmentAborted(abortSignal);
+      const composer = await this.waitForComposerToAcceptInput(page, abortSignal);
+      // Playwright's multiline fill maps through an input action that ChatGPT's Lexical editor can
+      // collapse to the first paragraph on the launcher-owned Electron surface. Clear separately,
+      // then transport the complete text in one CDP Input.insertText command. A cold ProseMirror
+      // composer can swallow unfocused insertText (actualChars=0); retry with a real click, then
+      // fill, and fail closed if the prompt is still empty.
+      await composer.fill("");
+      await this.activateComposerForInsert(composer, attempt > 1);
+      if (attempt === 2) {
+        await composer.fill(prompt);
+      } else {
+        await this.insertPromptText(page, prompt, abortSignal);
+      }
+      try {
+        const timeoutMs = attempt === CHATGPT_PROMPT_ATTACH_ATTEMPTS
+          ? CHATGPT_PROMPT_ATTACH_VERIFY_MS
+          : CHATGPT_PROMPT_ATTACH_EMPTY_RETRY_MS;
+        await this.assertPromptAttached(page, prompt, abortSignal, timeoutMs);
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (!isEmptyChatGptComposerAttachmentError(lastError) || attempt === CHATGPT_PROMPT_ATTACH_ATTEMPTS) {
+          throw lastError;
+        }
+        await captureDiagnostic?.("prompt-attach-retry");
+      }
+    }
+    throw lastError ?? chatGptComposerPromptMismatchError(prompt, "");
   }
 
   private async reanchorPromptCaret(page: Page, abortSignal?: AbortSignal): Promise<void> {

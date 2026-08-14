@@ -31,9 +31,29 @@ bun run src/cli.ts install-codex
 - `~/.codex/agents/chatgpt-web.toml` (subagent policy)
 - `~/.codex/skills/gpt-web-use/SKILL.md` (parent policy)
 
-It never sets `openai_base_url`. Restart Codex after install so the MCP server loads.
+It never sets `openai_base_url`. Restart Codex after install so a **thread** can load MCP.
 
-Windows uses the same browser-only login/daemon as Cursor. Do not install a second launchd/OS service.
+Windows uses the same browser-only login/daemon as Cursor. Do not install a second daemon.
+
+## Codex Desktop vs CLI spawn
+
+Cursor keeps `bun … src/cli.ts cursor-mcp` as a long-lived child of Cursor.exe. That process stays up between turns.
+
+Codex Desktop is different. `ChatGPT.exe` wraps `codex.exe app-server`. Opening or restarting the app calls `mcpServerStatus/list`, which starts every configured MCP server (chatgpt-web, node_repl, openaiDeveloperDocs, …), lists tools, then **cancels all of those MCP tasks in the same second**. The bun child exits with code 1 after that cancel. That is Desktop teardown of a status probe, not a `cursor-mcp` stdio crash.
+
+A tools-only server may log `-32601 Method not found` on `resources/list` / `resources/templates/list` if it does not implement those methods. `cursor-mcp` answers both with empty catalogs. That warning is not why Codex cancelled: Desktop also cancelled node_repl and openaiDeveloperDocs in the same probe.
+
+MCP stays alive while a Codex **thread/turn** is running (an open Desktop conversation, or `codex` CLI TUI/`exec`). Idle Desktop with no thread will not keep a bun `cursor-mcp` child. The config that Codex uses for a live thread is still:
+
+```toml
+# Managed by cursor-chatgpt-web install-codex; uninstall-codex removes this table.
+[mcp_servers.chatgpt-web]
+command = "<bun.exe>"
+args = ["<repo>/src/cli.ts", "cursor-mcp"]
+startup_timeout_sec = 30
+```
+
+Do not set `openai_base_url`. Do not point Codex at `serve` / `mcp-codex` for this path. Do not install a second daemon.
 
 ## Invoke
 

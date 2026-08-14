@@ -15,7 +15,12 @@ These are the revised critical scenarios. Automated coverage lives under `tests/
 | Sixth task | explicit 429 `chatgpt_web_tab_limit` | specialist + batch tests |
 | Task completes | browser slot becomes reusable | pool.active returns to 0 |
 | GPT Web High selected | visible High mode, slider index 2 | model contract + specialist default |
+| Closed control already High, empty menu | treat as High; do not require menu items | `tests/chatgpt-effort-control.test.ts`, `tests/browser-worker-contract.test.ts` |
+| High requested, Instant showing, empty menu | fail closed; no Instant fallback | `tests/browser-worker-contract.test.ts` |
+| Cold composer insert actualChars=0 | wait for editor ready, click-focus, retry fill; fail closed if still empty | `tests/browser-worker-contract.test.ts` |
+| MCP `console.info` during a turn | stderr only; stdout stays JSON-RPC | `tests/cursor-mcp-protocol.test.ts` |
 | Slider missing | fail closed | `tests/browser-worker-contract.test.ts` |
+| Codex Desktop `mcpServerStatus/list` | probe then cancel all MCP servers; durable MCP is a thread | `docs/codex.md`, `tests/cursor-mcp-protocol.test.ts` |
 | Unknown model reaches daemon | reject | protocol + specialist unknown-model tests |
 | Cursor cancels | browser task stops | cancel releases tab |
 | GPT Web returns analysis | parent can continue working | turn result includes `answer` |
